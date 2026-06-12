@@ -1,0 +1,58 @@
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using TripPlanner.Application.Common.Interfaces;
+using TripPlanner.Infrastructure.ExternalApis;
+using TripPlanner.Infrastructure.Identity;
+using TripPlanner.Infrastructure.Persistence;
+
+namespace TripPlanner.Infrastructure;
+
+/// <summary>
+/// Registers Infrastructure implementations for the Application interfaces.
+/// Called from Program.cs: <c>builder.Services.AddInfrastructure(builder.Configuration);</c>
+/// </summary>
+public static class DependencyInjection
+{
+    public static IServiceCollection AddInfrastructure(this IServiceCollection services, IConfiguration configuration)
+    {
+        AddPersistence(services, configuration);
+
+        // Options pattern: bind the "Jwt" section to JwtSettings.
+        services.Configure<JwtSettings>(configuration.GetSection(JwtSettings.SectionName));
+
+        // Security primitives.
+        services.AddScoped<IPasswordHasher, BCryptPasswordHasher>();
+        services.AddScoped<IJwtTokenGenerator, JwtTokenGenerator>();
+
+        // External travel data provider (typed HttpClient).
+        services.AddHttpClient<IDestinationProvider, OpenTripMapClient>(client =>
+        {
+            var baseUrl = configuration["OpenTripMap:BaseUrl"] ?? "https://api.opentripmap.com/0.1/en/places/";
+            client.BaseAddress = new Uri(baseUrl);
+        });
+
+        return services;
+    }
+
+    private static void AddPersistence(IServiceCollection services, IConfiguration configuration)
+    {
+        // Switch providers from configuration: "Database:Provider" = "Sqlite" (default) or "Postgres".
+        var provider = configuration["Database:Provider"] ?? "Sqlite";
+
+        services.AddDbContext<ApplicationDbContext>(options =>
+        {
+            if (provider.Equals("Postgres", StringComparison.OrdinalIgnoreCase))
+            {
+                options.UseNpgsql(configuration.GetConnectionString("Postgres"));
+            }
+            else
+            {
+                options.UseSqlite(configuration.GetConnectionString("Sqlite") ?? "Data Source=tripplanner.db");
+            }
+        });
+
+        // Expose the context to the Application layer through its interface.
+        services.AddScoped<IApplicationDbContext>(sp => sp.GetRequiredService<ApplicationDbContext>());
+    }
+}

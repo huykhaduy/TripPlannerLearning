@@ -1,0 +1,30 @@
+# ---------- .NET ----------
+bin/
+obj/
+*.user
+*.suo
+.vs/
+*.DotSettings.user
+
+# EF Core local SQLite database files
+*.db
+*.db-shm
+*.db-wal
+
+# ---------- Node / React ----------
+node_modules/
+frontend/dist/
+frontend/.vite/
+npm-debug.log*
+yarn-error.log*
+
+# ---------- Env / secrets ----------
+.env
+.env.local
+*.local.json
+appsettings.*.local.json
+
+# ---------- IDE / OS ----------
+.idea/
+.DS_Store
+Thumbs.db

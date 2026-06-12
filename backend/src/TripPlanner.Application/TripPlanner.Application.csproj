@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    APPLICATION LAYER
+    Use cases / business workflows. Depends ONLY on the Domain layer.
+    It defines INTERFACES (e.g. IPasswordHasher, IJwtTokenGenerator,
+    IApplicationDbContext) that the Infrastructure layer implements. This is the
+    Dependency Inversion Principle in action — the inner layer owns the contract.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\TripPlanner.Domain\TripPlanner.Domain.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- EF Core abstractions only: lets us expose DbSet<T> via IApplicationDbContext.
+         The concrete DbContext lives in Infrastructure. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.0" />
+  </ItemGroup>
+
+</Project>

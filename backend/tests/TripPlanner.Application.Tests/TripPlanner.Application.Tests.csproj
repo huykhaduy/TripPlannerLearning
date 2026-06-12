@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <!--
+    Unit tests for the Application layer (masterplan: "Unit testing, mocking,
+    and integration testing"). We use the EF Core in-memory provider as a fake
+    database so we can test use-cases without a real SQL server.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\TripPlanner.Application\TripPlanner.Application.csproj" />
+    <ProjectReference Include="..\..\src\TripPlanner.Infrastructure\TripPlanner.Infrastructure.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="10.0.0" />
+    <PackageReference Include="Moq" Version="4.20.72" />
+  </ItemGroup>
+
+</Project>

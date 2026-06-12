@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    DOMAIN LAYER
+    The heart of the application. Contains enterprise entities and business rules.
+    RULE: this project must have NO dependency on any other project or on any
+    infrastructure framework (no EF Core, no ASP.NET, no JSON libraries).
+  -->
+  <PropertyGroup>
+    <RootNamespace>TripPlanner.Domain</RootNamespace>
+  </PropertyGroup>
+
+</Project>

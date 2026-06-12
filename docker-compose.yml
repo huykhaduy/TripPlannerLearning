@@ -1,0 +1,30 @@
+# Optional PostgreSQL service for students who want to practise running against
+# a "real" database instead of the default SQLite file.
+#
+#   1. docker compose up -d
+#   2. In src/TripPlanner.WebApi/appsettings.Development.json set:
+#        "Database": { "Provider": "Postgres" }
+#      and use the "Postgres" connection string already provided there.
+#   3. Re-create migrations for the Postgres provider, then `dotnet ef database update`.
+#
+# The default template runs on SQLite with NO Docker required.
+services:
+  postgres:
+    image: postgres:17
+    container_name: tripplanner-postgres
+    environment:
+      POSTGRES_USER: tripplanner
+      POSTGRES_PASSWORD: tripplanner
+      POSTGRES_DB: tripplanner
+    ports:
+      - "5432:5432"
+    volumes:
+      - tripplanner_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tripplanner"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  tripplanner_pgdata:

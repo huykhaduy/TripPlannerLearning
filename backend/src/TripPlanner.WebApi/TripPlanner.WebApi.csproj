@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!--
+    PRESENTATION LAYER (ASP.NET Core Web API)
+    The composition root: wires the layers together, exposes HTTP endpoints,
+    validates JWTs, and translates exceptions to HTTP responses.
+    Depends on Application (for use-case interfaces) and Infrastructure (only to
+    register implementations in Program.cs).
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\TripPlanner.Application\TripPlanner.Application.csproj" />
+    <ProjectReference Include="..\TripPlanner.Infrastructure\TripPlanner.Infrastructure.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.0" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.0" />
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="7.2.0" />
+  </ItemGroup>
+
+</Project>

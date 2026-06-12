@@ -1,0 +1,42 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TripPlanner.Domain", "src\TripPlanner.Domain\TripPlanner.Domain.csproj", "{A8B50926-F906-4874-AD1B-0DA353EF1250}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TripPlanner.Application", "src\TripPlanner.Application\TripPlanner.Application.csproj", "{59A1DDFD-9581-4649-A089-6FC0C99C28F8}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TripPlanner.Infrastructure", "src\TripPlanner.Infrastructure\TripPlanner.Infrastructure.csproj", "{FF51770B-E311-4508-949B-73A0D0AFBB8E}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TripPlanner.WebApi", "src\TripPlanner.WebApi\TripPlanner.WebApi.csproj", "{2800F585-E53A-44D6-93BD-846B9C787D80}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TripPlanner.Application.Tests", "tests\TripPlanner.Application.Tests\TripPlanner.Application.Tests.csproj", "{09F04993-82C5-4AED-AB56-4357AC4B0BFC}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{A8B50926-F906-4874-AD1B-0DA353EF1250}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A8B50926-F906-4874-AD1B-0DA353EF1250}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A8B50926-F906-4874-AD1B-0DA353EF1250}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A8B50926-F906-4874-AD1B-0DA353EF1250}.Release|Any CPU.Build.0 = Release|Any CPU
+		{59A1DDFD-9581-4649-A089-6FC0C99C28F8}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{59A1DDFD-9581-4649-A089-6FC0C99C28F8}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{59A1DDFD-9581-4649-A089-6FC0C99C28F8}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{59A1DDFD-9581-4649-A089-6FC0C99C28F8}.Release|Any CPU.Build.0 = Release|Any CPU
+		{FF51770B-E311-4508-949B-73A0D0AFBB8E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{FF51770B-E311-4508-949B-73A0D0AFBB8E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{FF51770B-E311-4508-949B-73A0D0AFBB8E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{FF51770B-E311-4508-949B-73A0D0AFBB8E}.Release|Any CPU.Build.0 = Release|Any CPU
+		{2800F585-E53A-44D6-93BD-846B9C787D80}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{2800F585-E53A-44D6-93BD-846B9C787D80}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{2800F585-E53A-44D6-93BD-846B9C787D80}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{2800F585-E53A-44D6-93BD-846B9C787D80}.Release|Any CPU.Build.0 = Release|Any CPU
+		{09F04993-82C5-4AED-AB56-4357AC4B0BFC}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{09F04993-82C5-4AED-AB56-4357AC4B0BFC}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{09F04993-82C5-4AED-AB56-4357AC4B0BFC}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{09F04993-82C5-4AED-AB56-4357AC4B0BFC}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal
