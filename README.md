@@ -69,6 +69,7 @@ After the **one-time** database setup below (creating the initial EF migration),
 can launch the API and frontend together from the repo root:
 
 ```bash
+start-dev.bat        # Windows
 ./dev.sh        # macOS / Linux  (Ctrl-C stops both)
 ./dev.ps1       # Windows / PowerShell  (opens two windows)
 ```
