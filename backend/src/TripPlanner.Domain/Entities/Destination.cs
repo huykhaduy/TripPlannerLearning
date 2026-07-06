@@ -4,13 +4,13 @@ namespace TripPlanner.Domain.Entities;
 
 /// <summary>
 /// A place / attraction the user can add to a trip (Features 1 &amp; 2).
-/// Data originates from an external provider (e.g. OpenTripMap / Foursquare);
+/// Data originates from an external provider (e.g. Geoapify);
 /// we cache the fields we care about so a trip still renders if the provider
 /// is unavailable later.
 /// </summary>
 public class Destination : BaseEntity
 {
-    /// <summary>The provider's stable identifier (e.g. OpenTripMap "xid").</summary>
+    /// <summary>The provider's stable identifier (e.g. Geoapify "place_id").</summary>
     public required string ProviderId { get; set; }
 
     public required string Name { get; set; }

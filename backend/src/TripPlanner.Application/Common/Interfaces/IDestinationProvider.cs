@@ -3,10 +3,10 @@ using TripPlanner.Application.Features.Destinations.Dtos;
 namespace TripPlanner.Application.Common.Interfaces;
 
 /// <summary>
-/// Abstraction over the external travel data provider(s) — e.g. OpenTripMap for
-/// geocoding/POIs and Foursquare for enrichment (Features 1 &amp; 2).
+/// Abstraction over the external travel data provider(s) — e.g. Geoapify for
+/// geocoding/POIs (Features 1 &amp; 2).
 ///
-/// TODO (students): implement this in Infrastructure (see OpenTripMapClient).
+/// TODO (students): implement this in Infrastructure (see GeoapifyClient).
 /// Keeping it behind an interface means your search use-cases never depend on a
 /// specific vendor and can be unit-tested with a fake provider.
 /// </summary>

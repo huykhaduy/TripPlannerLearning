@@ -28,7 +28,7 @@ HTTP translation, unit tests, and a React auth context with route protection.
 
 ## 🛠️ Feature 1: Destination Suggestion
 
-Backend: `DestinationService.cs` + `OpenTripMapClient.cs` · Frontend: `SearchPage.tsx`
+Backend: `DestinationService.cs` + `GeoapifyClient.cs` · Frontend: `SearchPage.tsx`
 Endpoints (already routed): `GET /api/destinations/locations`, `GET /api/destinations/attractions`
 
 | US  | Title                              | Pri | Key acceptance criteria |
@@ -46,7 +46,7 @@ Endpoints (already routed): `GET /api/destinations/locations`, `GET /api/destina
 
 ## 🛠️ Feature 2: Destination Details
 
-Backend: `DestinationService.GetDetailsAsync` + `OpenTripMapClient` · Frontend: a details view
+Backend: `DestinationService.GetDetailsAsync` + `GeoapifyClient` · Frontend: a details view
 Endpoint: `GET /api/destinations/{providerId}`
 
 | US  | Title                              | Pri | Key acceptance criteria |
@@ -101,7 +101,7 @@ Endpoints (already routed, require auth): `GET/POST /api/trips`, `GET/PUT /api/t
 1. **Get oriented** — run the app, register/login, read `AuthService` + `AuthController`.
 2. **Feature 3 core (🔴)** — Trip CRUD (US1, US2, US3, US7) + the trips UI. Pure
    backend logic against your own DB; no external API needed. Great warm-up.
-3. **Feature 1 (🔴)** — `OpenTripMapClient` + search/attractions UI.
+3. **Feature 1 (🔴)** — `GeoapifyClient` + search/attractions UI.
 4. **Feature 2** — destination details view.
 5. **Feature 3 advanced** — drag-and-drop scheduling, reordering, cross-day moves.
 6. **Polish** — filters/sort, empty/error/loading states, performance & caching, more tests.

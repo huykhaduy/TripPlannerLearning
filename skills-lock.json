@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "clean-architecture": {
+      "source": "wondelai/skills",
+      "sourceType": "github",
+      "skillPath": "clean-architecture/SKILL.md",
+      "computedHash": "41bc54cd69d52698ca747529a148d971e23587cc872db58f715b59de95ef51e6"
+    }
+  }
+}

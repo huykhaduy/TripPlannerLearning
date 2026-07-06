@@ -26,9 +26,9 @@ public static class DependencyInjection
         services.AddScoped<IJwtTokenGenerator, JwtTokenGenerator>();
 
         // External travel data provider (typed HttpClient).
-        services.AddHttpClient<IDestinationProvider, OpenTripMapClient>(client =>
+        services.AddHttpClient<IDestinationProvider, GeoapifyClient>(client =>
         {
-            var baseUrl = configuration["OpenTripMap:BaseUrl"] ?? "https://api.opentripmap.com/0.1/en/places/";
+            var baseUrl = configuration["Geoapify:BaseUrl"] ?? "https://api.geoapify.com/";
             client.BaseAddress = new Uri(baseUrl);
         });
 

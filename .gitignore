@@ -28,3 +28,6 @@ appsettings.*.local.json
 .idea/
 .DS_Store
 Thumbs.db
+
+# ---------- Agent tooling ----------
+.agents/

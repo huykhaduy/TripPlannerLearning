@@ -21,7 +21,7 @@ by following the same patterns.
 | Backend      | ASP.NET Core Web API (.NET 10), EF Core, JWT, xUnit       |
 | Frontend     | React 19 + TypeScript, Vite, React Router, axios          |
 | Database     | **SQLite** by default (no setup) — PostgreSQL optional     |
-| External API | OpenTripMap (+ optional Foursquare) for destination data  |
+| External API | Geoapify for destination data  |
 
 ---
 
@@ -57,7 +57,7 @@ WebApi ──▶ Application ──▶ Domain
 - [.NET 10 SDK](https://dotnet.microsoft.com/download)
 - [Node.js 20+](https://nodejs.org/) and npm
 - (Optional) [Docker](https://www.docker.com/) — only if you switch to PostgreSQL
-- An [OpenTripMap API key](https://opentripmap.io/product) — free, needed for Features 1 & 2
+- A [Geoapify API key](https://myprojects.geoapify.com/) — free, needed for Features 1 & 2
 
 ---
 
@@ -148,7 +148,7 @@ dotnet test
 | You implement…            | File(s)                                                              |
 |---------------------------|---------------------------------------------------------------------|
 | Destination search/details| `backend/src/TripPlanner.Application/Features/Destinations/DestinationService.cs` |
-| External API calls        | `backend/src/TripPlanner.Infrastructure/ExternalApis/OpenTripMapClient.cs`        |
+| External API calls        | `backend/src/TripPlanner.Infrastructure/ExternalApis/GeoapifyClient.cs`        |
 | Trip planner logic        | `backend/src/TripPlanner.Application/Features/Trips/TripService.cs`               |
 | Search & details UI       | `frontend/src/features/destinations/SearchPage.tsx`                              |
 | Trip planner UI           | `frontend/src/features/trips/TripsPage.tsx`                                      |
