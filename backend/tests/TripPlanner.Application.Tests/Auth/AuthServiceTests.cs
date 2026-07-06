@@ -4,6 +4,7 @@ using TripPlanner.Application.Common.Exceptions;
 using TripPlanner.Application.Common.Interfaces;
 using TripPlanner.Application.Features.Auth;
 using TripPlanner.Application.Features.Auth.Dtos;
+using TripPlanner.Application.Features.Auth.Validators;
 using TripPlanner.Domain.Entities;
 using TripPlanner.Infrastructure.Identity;
 using TripPlanner.Infrastructure.Persistence;
@@ -35,7 +36,8 @@ public class AuthServiceTests
             .Setup(t => t.GenerateToken(It.IsAny<User>()))
             .Returns(("fake-jwt", DateTimeOffset.UtcNow.AddHours(1)));
 
-        return new AuthService(db, hasher, tokenGenerator.Object);
+        // Real validator — it's pure logic, so mocking it would only hide bugs.
+        return new AuthService(db, hasher, tokenGenerator.Object, new RegisterRequestValidator());
     }
 
     [Fact]

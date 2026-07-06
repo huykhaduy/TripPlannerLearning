@@ -1,6 +1,8 @@
+using FluentValidation;
 using Microsoft.EntityFrameworkCore;
 using TripPlanner.Application.Common.Exceptions;
 using TripPlanner.Application.Common.Interfaces;
+using TripPlanner.Application.Common.Validation;
 using TripPlanner.Application.Features.Auth.Dtos;
 using TripPlanner.Domain.Entities;
 
@@ -23,26 +25,30 @@ namespace TripPlanner.Application.Features.Auth;
 /// </summary>
 public class AuthService : IAuthService
 {
-    private const int MinPasswordLength = 8; // Feature 4 / US1 business rule.
-
     private readonly IApplicationDbContext _db;
     private readonly IPasswordHasher _passwordHasher;
     private readonly IJwtTokenGenerator _tokenGenerator;
+    private readonly IValidator<RegisterRequest> _registerValidator;
 
     public AuthService(
         IApplicationDbContext db,
         IPasswordHasher passwordHasher,
-        IJwtTokenGenerator tokenGenerator)
+        IJwtTokenGenerator tokenGenerator,
+        IValidator<RegisterRequest> registerValidator)
     {
         _db = db;
         _passwordHasher = passwordHasher;
         _tokenGenerator = tokenGenerator;
+        _registerValidator = registerValidator;
     }
 
     public async Task<AuthResponse> RegisterAsync(RegisterRequest request, CancellationToken cancellationToken = default)
     {
+        // Input rules live in RegisterRequestValidator (Feature 4 / US1);
+        // failures surface as our ValidationException -> HTTP 400.
+        await _registerValidator.ValidateAndThrowAppExceptionAsync(request, cancellationToken);
+
         var email = NormalizeEmail(request.Email);
-        ValidateRegistration(email, request.Password);
 
         // Business rule: email must be unique.
         var emailTaken = await _db.Users.AnyAsync(u => u.Email == email, cancellationToken);
@@ -86,28 +92,7 @@ public class AuthService : IAuthService
     private AuthResponse BuildAuthResponse(User user)
     {
         var (token, expiresAt) = _tokenGenerator.GenerateToken(user);
-        var userDto = new UserDto(user.Id, user.Email, user.DisplayName);
-        return new AuthResponse(token, expiresAt, userDto);
-    }
-
-    private static void ValidateRegistration(string email, string password)
-    {
-        var errors = new Dictionary<string, string[]>();
-
-        if (string.IsNullOrWhiteSpace(email) || !email.Contains('@'))
-        {
-            errors[nameof(RegisterRequest.Email)] = ["A valid email address is required."];
-        }
-
-        if (string.IsNullOrEmpty(password) || password.Length < MinPasswordLength)
-        {
-            errors[nameof(RegisterRequest.Password)] = [$"Password must be at least {MinPasswordLength} characters."];
-        }
-
-        if (errors.Count > 0)
-        {
-            throw new ValidationException(errors);
-        }
+        return new AuthResponse(token, expiresAt, user.ToDto());
     }
 
     private static string NormalizeEmail(string email) => email.Trim().ToLowerInvariant();

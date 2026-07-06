@@ -1,3 +1,4 @@
+using FluentValidation;
 using Microsoft.Extensions.DependencyInjection;
 using TripPlanner.Application.Features.Auth;
 using TripPlanner.Application.Features.Destinations;
@@ -16,6 +17,9 @@ public static class DependencyInjection
         services.AddScoped<IAuthService, AuthService>();
         services.AddScoped<ITripService, TripService>();
         services.AddScoped<IDestinationService, DestinationService>();
+
+        // Registers every AbstractValidator<T> in this assembly as IValidator<T>.
+        services.AddValidatorsFromAssembly(typeof(DependencyInjection).Assembly);
 
         return services;
     }

@@ -1,5 +1,8 @@
+using FluentValidation;
 using TripPlanner.Application.Common.Interfaces;
+using TripPlanner.Application.Common.Validation;
 using TripPlanner.Application.Features.Trips.Dtos;
+using TripPlanner.Domain.Entities;
 
 namespace TripPlanner.Application.Features.Trips;
 
@@ -18,11 +21,16 @@ public class TripService : ITripService
 {
     private readonly IApplicationDbContext _db;
     private readonly ICurrentUserService _currentUser;
+    private readonly IValidator<CreateTripRequest> _createTripValidator;
 
-    public TripService(IApplicationDbContext db, ICurrentUserService currentUser)
+    public TripService(
+        IApplicationDbContext db,
+        ICurrentUserService currentUser,
+        IValidator<CreateTripRequest> createTripValidator)
     {
         _db = db;
         _currentUser = currentUser;
+        _createTripValidator = createTripValidator;
     }
 
     public Task<IReadOnlyList<TripSummaryDto>> GetMyTripsAsync(CancellationToken cancellationToken = default)
@@ -33,9 +41,23 @@ public class TripService : ITripService
         // TODO: F3/US10 — load the trip (owned by current user) with days + items.
         => throw new NotImplementedException("Implement GetTrip — see Feature 3, US10.");
 
-    public Task<TripSummaryDto> CreateTripAsync(CreateTripRequest request, CancellationToken cancellationToken = default)
-        // TODO: F3/US1 — validate name, create a Trip for the current user, save.
-        => throw new NotImplementedException("Implement CreateTrip — see Feature 3, US1.");
+    public async Task<TripSummaryDto> CreateTripAsync(CreateTripRequest request, CancellationToken cancellationToken = default)
+    {
+        // F3/US1 — name is required (CreateTripRequestValidator -> HTTP 400).
+        await _createTripValidator.ValidateAndThrowAppExceptionAsync(request, cancellationToken);
+
+        var trip = new Trip
+        {
+            Name = request.Name.Trim(),
+            // NFR 6: the trip belongs to the caller; throws 401 when anonymous.
+            UserId = _currentUser.GetRequiredUserId(),
+        };
+
+        _db.Trips.Add(trip);
+        await _db.SaveChangesAsync(cancellationToken);
+
+        return trip.ToSummaryDto();
+    }
 
     public Task<TripDetailDto> UpdateTripAsync(Guid tripId, UpdateTripRequest request, CancellationToken cancellationToken = default)
         // TODO: F3/US2 — rename and/or set dates; regenerate itinerary days.
