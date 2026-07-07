@@ -11,8 +11,7 @@ public class CreateTripRequestValidator : AbstractValidator<CreateTripRequest>
     public CreateTripRequestValidator()
     {
         RuleFor(x => x.Name)
-            .Must(name => !string.IsNullOrWhiteSpace(name))
-            .WithMessage("Trip name is required.")
+            .NotEmpty().WithMessage("Trip name is required.")
             .MaximumLength(MaxNameLength);
     }
 }

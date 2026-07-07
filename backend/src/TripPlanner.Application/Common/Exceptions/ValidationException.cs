@@ -20,4 +20,11 @@ public class ValidationException : Exception
     }
 
     public IDictionary<string, string[]> Errors { get; }
+
+    /// <summary>
+    /// Convenience for the common single-field case in service-layer business
+    /// rules (rules that need the DB and therefore can't live in a validator).
+    /// </summary>
+    public static ValidationException ForProperty(string propertyName, string message) =>
+        new(new Dictionary<string, string[]> { [propertyName] = [message] });
 }

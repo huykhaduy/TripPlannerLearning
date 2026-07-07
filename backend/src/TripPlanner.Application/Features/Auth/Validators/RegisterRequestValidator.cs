@@ -15,11 +15,13 @@ public class RegisterRequestValidator : AbstractValidator<RegisterRequest>
     public RegisterRequestValidator()
     {
         RuleFor(x => x.Email)
-            .Must(email => !string.IsNullOrWhiteSpace(email) && email.Contains('@'))
-            .WithMessage("A valid email address is required.");
+            .Cascade(CascadeMode.Stop) // don't run Contains('@') on a null email
+            .NotEmpty().WithMessage("A valid email address is required.")
+            .Must(email => email.Contains('@')).WithMessage("A valid email address is required.");
 
         RuleFor(x => x.Password)
-            .Must(password => !string.IsNullOrEmpty(password) && password.Length >= MinPasswordLength)
-            .WithMessage($"Password must be at least {MinPasswordLength} characters.");
+            .Cascade(CascadeMode.Stop)
+            .NotEmpty().WithMessage($"Password must be at least {MinPasswordLength} characters.")
+            .MinimumLength(MinPasswordLength).WithMessage($"Password must be at least {MinPasswordLength} characters.");
     }
 }
