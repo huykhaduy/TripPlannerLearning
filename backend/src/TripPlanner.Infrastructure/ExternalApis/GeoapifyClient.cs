@@ -1,3 +1,7 @@
+using System.Net;
+using System.Net.Http.Json;
+using System.Text.Json.Serialization;
+using Microsoft.Extensions.Options;
 using TripPlanner.Application.Common.Interfaces;
 using TripPlanner.Application.Features.Destinations.Dtos;
 
@@ -30,10 +34,12 @@ namespace TripPlanner.Infrastructure.ExternalApis;
 public class GeoapifyClient : IDestinationProvider
 {
     private readonly HttpClient _httpClient;
+    private readonly GeoapifySettings _settings;
 
-    public GeoapifyClient(HttpClient httpClient)
+    public GeoapifyClient(HttpClient httpClient, IOptions<GeoapifySettings> settings)
     {
         _httpClient = httpClient;
+        _settings = settings.Value;
     }
 
     public Task<IReadOnlyList<LocationSuggestionDto>> SearchLocationsAsync(string query, CancellationToken cancellationToken = default)
@@ -48,9 +54,69 @@ public class GeoapifyClient : IDestinationProvider
         throw new NotImplementedException("Call the Geoapify Places API — see Feature 1, US3.");
     }
 
-    public Task<DestinationDetailsDto?> GetDestinationDetailsAsync(string providerId, CancellationToken cancellationToken = default)
+    public async Task<DestinationDetailsDto?> GetDestinationDetailsAsync(string providerId, CancellationToken cancellationToken = default)
     {
-        // TODO: call Geoapify Place Details (`v2/place-details?id={providerId}`) for full details.
-        throw new NotImplementedException("Call the Geoapify place-details API — see Feature 2, US1.");
+        var url = $"v2/place-details?id={Uri.EscapeDataString(providerId)}&apiKey={_settings.ApiKey}";
+
+        using var response = await _httpClient.GetAsync(url, cancellationToken);
+
+        // Geoapify answers 400/404 for ids it does not recognise — for us that
+        // simply means "no such destination", which the contract expresses as null.
+        if (response.StatusCode is HttpStatusCode.BadRequest or HttpStatusCode.NotFound)
+        {
+            return null;
+        }
+
+        response.EnsureSuccessStatusCode(); // anything else (401, 5xx) is a real fault
+
+        var payload = await response.Content.ReadFromJsonAsync<PlaceDetailsResponse>(cancellationToken);
+        var place = payload?.Features?.FirstOrDefault()?.Properties;
+        if (place is null)
+        {
+            return null; // well-formed response but no matching place
+        }
+
+        return new DestinationDetailsDto(
+            // Always echo the REQUESTED id, not the (sometimes different)
+            // canonical place_id in the response — it is the Destination cache
+            // key, and repeat adds must hit the same row.
+            ProviderId: providerId,
+            Name: place.Name ?? place.AddressLine1 ?? "Unnamed place",
+            Category: place.Categories?.FirstOrDefault(),
+            Description: place.Description,
+            ImageUrl: place.WikiAndMedia?.Image,
+            Latitude: place.Lat,
+            Longitude: place.Lon,
+            Address: place.Formatted,
+            Website: place.Website,
+            OpeningHours: place.OpeningHours);
     }
+
+    // ------------------------------------------------------------------
+    // Private wire DTOs — the exact JSON shapes Geoapify returns (GeoJSON
+    // FeatureCollection). Kept private: the rest of the app only ever sees
+    // the Application-layer DTOs mapped above.
+    // ------------------------------------------------------------------
+
+    private sealed record PlaceDetailsResponse(
+        [property: JsonPropertyName("features")] List<PlaceFeature>? Features);
+
+    private sealed record PlaceFeature(
+        [property: JsonPropertyName("properties")] PlaceProperties? Properties);
+
+    private sealed record PlaceProperties(
+        [property: JsonPropertyName("place_id")] string? PlaceId,
+        [property: JsonPropertyName("name")] string? Name,
+        [property: JsonPropertyName("address_line1")] string? AddressLine1,
+        [property: JsonPropertyName("formatted")] string? Formatted,
+        [property: JsonPropertyName("categories")] List<string>? Categories,
+        [property: JsonPropertyName("description")] string? Description,
+        [property: JsonPropertyName("website")] string? Website,
+        [property: JsonPropertyName("opening_hours")] string? OpeningHours,
+        [property: JsonPropertyName("lat")] double? Lat,
+        [property: JsonPropertyName("lon")] double? Lon,
+        [property: JsonPropertyName("wiki_and_media")] WikiAndMedia? WikiAndMedia);
+
+    private sealed record WikiAndMedia(
+        [property: JsonPropertyName("image")] string? Image);
 }

@@ -25,7 +25,8 @@ public static class DependencyInjection
         services.AddScoped<IPasswordHasher, BCryptPasswordHasher>();
         services.AddScoped<IJwtTokenGenerator, JwtTokenGenerator>();
 
-        // External travel data provider (typed HttpClient).
+        // External travel data provider (typed HttpClient + bound settings).
+        services.Configure<GeoapifySettings>(configuration.GetSection(GeoapifySettings.SectionName));
         services.AddHttpClient<IDestinationProvider, GeoapifyClient>(client =>
         {
             var baseUrl = configuration["Geoapify:BaseUrl"] ?? "https://api.geoapify.com/";

@@ -12,6 +12,12 @@ using TripPlanner.WebApi.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Local overrides (API keys etc.) — git-ignored, loaded last so it wins.
+builder.Configuration.AddJsonFile(
+    $"appsettings.{builder.Environment.EnvironmentName}.local.json",
+    optional: true,
+    reloadOnChange: true);
+
 // ---------------------------------------------------------------------------
 // 1. Register the layers. Each layer owns its own DI extension method, so this
 //    composition root stays small and readable.
