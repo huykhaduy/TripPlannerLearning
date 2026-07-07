@@ -1,4 +1,6 @@
+using FluentValidation;
 using TripPlanner.Application.Common.Interfaces;
+using TripPlanner.Application.Common.Validation;
 using TripPlanner.Application.Features.Destinations.Dtos;
 
 namespace TripPlanner.Application.Features.Destinations;
@@ -17,18 +19,49 @@ namespace TripPlanner.Application.Features.Destinations;
 /// </summary>
 public class DestinationService : IDestinationService
 {
-    private readonly IDestinationProvider _provider;
+    private const int MaxLocationResults = 5;
 
-    public DestinationService(IDestinationProvider provider)
+    private readonly IDestinationProvider _provider;
+    private readonly IValidator<SearchLocationsRequest> _searchValidator;
+
+    public DestinationService(
+        IDestinationProvider provider,
+        IValidator<SearchLocationsRequest> searchValidator)
     {
         _provider = provider;
+        _searchValidator = searchValidator;
     }
 
-    public Task<IReadOnlyList<LocationSuggestionDto>> SearchLocationsAsync(string query, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<LocationSuggestionDto>> SearchLocationsAsync(string query, CancellationToken cancellationToken = default)
     {
-        // TODO: F1/US1-US2 — validate query (min length), call provider, de-dupe,
-        //       rank exact matches first, return at most 5 results.
-        throw new NotImplementedException("Implement location search — see Feature 1, US1 & US2.");
+        // F1/US1-US2 — the TRIMMED query must be ≥2 chars (spec §11.2), so
+        // validate the same string we send to the provider, not the raw input.
+        var trimmedQuery = query?.Trim() ?? string.Empty;
+        await _searchValidator.ValidateAndThrowAppExceptionAsync(new SearchLocationsRequest(trimmedQuery), cancellationToken);
+
+        var suggestions = await _provider.SearchLocationsAsync(trimmedQuery, cancellationToken);
+
+        // Geoapify can return the same city under several place ids — dedupe on
+        // what the user actually sees (name + country), rank exact and prefix
+        // matches above substring hits (F1/US2 business rule), then cap at 5.
+        var loweredQuery = trimmedQuery.ToLowerInvariant();
+        return suggestions
+            .DistinctBy(s => (s.Name.ToLowerInvariant(), s.Country?.ToLowerInvariant()))
+            .OrderBy(s => RelevanceRank(s.Name, loweredQuery))
+            .Take(MaxLocationResults)
+            .ToList();
+    }
+
+    /// <summary>Exact match first, then prefix matches, then everything else.</summary>
+    private static int RelevanceRank(string name, string loweredQuery)
+    {
+        var loweredName = name.ToLowerInvariant();
+        if (loweredName == loweredQuery)
+        {
+            return 0;
+        }
+
+        return loweredName.StartsWith(loweredQuery, StringComparison.Ordinal) ? 1 : 2;
     }
 
     public Task<IReadOnlyList<DestinationSummaryDto>> GetAttractionsAsync(double latitude, double longitude, double radiusKm, CancellationToken cancellationToken = default)

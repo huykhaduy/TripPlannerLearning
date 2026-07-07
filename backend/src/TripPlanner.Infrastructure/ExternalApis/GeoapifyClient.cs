@@ -42,10 +42,31 @@ public class GeoapifyClient : IDestinationProvider
         _settings = settings.Value;
     }
 
-    public Task<IReadOnlyList<LocationSuggestionDto>> SearchLocationsAsync(string query, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<LocationSuggestionDto>> SearchLocationsAsync(string query, CancellationToken cancellationToken = default)
     {
-        // TODO: call Geoapify geocode autocomplete (`v1/geocode/autocomplete`) and map to suggestions.
-        throw new NotImplementedException("Call the Geoapify geocoding API — see Feature 1, US1/US2.");
+        // No `type=` restriction: the search must surface countries as well as
+        // cities (F1/US2 business rule). We over-fetch because the result_type
+        // filter below discards streets/districts; the service caps at 5.
+        var url = $"v1/geocode/autocomplete?text={Uri.EscapeDataString(query)}&limit=10&apiKey={_settings.ApiKey}";
+
+        using var response = await _httpClient.GetAsync(url, cancellationToken);
+        response.EnsureSuccessStatusCode();
+
+        var payload = await response.Content.ReadFromJsonAsync<GeocodeResponse>(cancellationToken);
+        if (payload?.Features is null)
+        {
+            return [];
+        }
+
+        return payload.Features
+            .Select(f => f.Properties)
+            .Where(p => p?.ResultType is "city" or "country")
+            .Select(p => new LocationSuggestionDto(
+                Name: p!.City ?? p.Country ?? p.Formatted ?? "Unknown location",
+                Country: p.Country,
+                Latitude: p.Lat,
+                Longitude: p.Lon))
+            .ToList();
     }
 
     public Task<IReadOnlyList<DestinationSummaryDto>> GetAttractionsAsync(double latitude, double longitude, double radiusKm, CancellationToken cancellationToken = default)
@@ -97,6 +118,20 @@ public class GeoapifyClient : IDestinationProvider
     // FeatureCollection). Kept private: the rest of the app only ever sees
     // the Application-layer DTOs mapped above.
     // ------------------------------------------------------------------
+
+    private sealed record GeocodeResponse(
+        [property: JsonPropertyName("features")] List<GeocodeFeature>? Features);
+
+    private sealed record GeocodeFeature(
+        [property: JsonPropertyName("properties")] GeocodeProperties? Properties);
+
+    private sealed record GeocodeProperties(
+        [property: JsonPropertyName("result_type")] string? ResultType,
+        [property: JsonPropertyName("city")] string? City,
+        [property: JsonPropertyName("country")] string? Country,
+        [property: JsonPropertyName("formatted")] string? Formatted,
+        [property: JsonPropertyName("lat")] double Lat,
+        [property: JsonPropertyName("lon")] double Lon);
 
     private sealed record PlaceDetailsResponse(
         [property: JsonPropertyName("features")] List<PlaceFeature>? Features);

@@ -1,5 +1,8 @@
 namespace TripPlanner.Application.Features.Destinations.Dtos;
 
+/// <summary>F1/US1 &amp; US2 — the search query, wrapped so it can be validated.</summary>
+public record SearchLocationsRequest(string Query);
+
 /// <summary>F1/US1 &amp; US2 — a city/country autocomplete suggestion.</summary>
 public record LocationSuggestionDto(string Name, string? Country, double Latitude, double Longitude);
 
