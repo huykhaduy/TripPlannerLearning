@@ -26,8 +26,23 @@ public class DestinationServiceTests
             .Setup(p => p.SearchLocationsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(providerResults);
 
-        return new DestinationService(provider.Object, new SearchLocationsRequestValidator());
+        return CreateSut(provider);
     }
+
+    /// <summary>As above, but the provider returns attractions (F1/US3 tests).</summary>
+    private static DestinationService CreateAttractionsSut(params DestinationSummaryDto[] providerResults)
+    {
+        var provider = new Mock<IDestinationProvider>();
+        provider
+            .Setup(p => p.GetAttractionsAsync(
+                It.IsAny<double>(), It.IsAny<double>(), It.IsAny<double>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(providerResults);
+
+        return CreateSut(provider);
+    }
+
+    private static DestinationService CreateSut(Mock<IDestinationProvider> provider) =>
+        new(provider.Object, new SearchLocationsRequestValidator(), new GetAttractionsRequestValidator());
 
     /// <summary>Shorthand — coordinates don't matter for these tests.</summary>
     private static LocationSuggestionDto Suggestion(string name, string? country = null) =>
@@ -98,7 +113,7 @@ public class DestinationServiceTests
         provider
             .Setup(p => p.SearchLocationsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync([]);
-        var sut = new DestinationService(provider.Object, new SearchLocationsRequestValidator());
+        var sut = CreateSut(provider);
 
         await sut.SearchLocationsAsync("  paris  ");
 
@@ -116,5 +131,55 @@ public class DestinationServiceTests
         var results = await sut.SearchLocationsAsync("zzzzqqq");
 
         Assert.Empty(results);
+    }
+
+    // ------------------------------------------------------------------
+    // F1/US3 — GetAttractionsAsync
+    // ------------------------------------------------------------------
+
+    /// <summary>Shorthand — only the fields under test vary.</summary>
+    private static DestinationSummaryDto Attraction(string name, double? rating = null) =>
+        new(ProviderId: $"id-{name}", Name: name, Category: null, ImageUrl: null, Rating: rating);
+
+    [Fact]
+    public async Task GetAttractionsAsync_OrdersByRatingDescending_UnratedLast()
+    {
+        var sut = CreateAttractionsSut(
+            Attraction("No rating A"),
+            Attraction("Three stars", rating: 3.0),
+            Attraction("Five stars", rating: 5.0),
+            Attraction("No rating B"));
+
+        var results = await sut.GetAttractionsAsync(latitude: 48.85, longitude: 2.35, radiusKm: 20);
+
+        Assert.Equal(
+            ["Five stars", "Three stars", "No rating A", "No rating B"],
+            results.Select(r => r.Name));
+    }
+
+    [Fact]
+    public async Task GetAttractionsAsync_WithMoreThanTwentyResults_CapsAtTwenty()
+    {
+        var many = Enumerable.Range(1, 25).Select(i => Attraction($"POI {i}")).ToArray();
+        var sut = CreateAttractionsSut(many);
+
+        var results = await sut.GetAttractionsAsync(latitude: 0, longitude: 0, radiusKm: 20);
+
+        Assert.Equal(20, results.Count);
+    }
+
+    [Theory]
+    [InlineData(91, 0, 20)]     // latitude off the globe
+    [InlineData(-91, 0, 20)]
+    [InlineData(0, 181, 20)]    // longitude off the globe
+    [InlineData(0, 0, 0)]       // zero radius
+    [InlineData(0, 0, 51)]      // radius beyond the 50 km cap
+    public async Task GetAttractionsAsync_WithInvalidInputs_ThrowsValidation(
+        double latitude, double longitude, double radiusKm)
+    {
+        var sut = CreateAttractionsSut();
+
+        await Assert.ThrowsAsync<ValidationException>(() =>
+            sut.GetAttractionsAsync(latitude, longitude, radiusKm));
     }
 }

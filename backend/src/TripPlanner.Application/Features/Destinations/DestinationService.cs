@@ -20,16 +20,20 @@ namespace TripPlanner.Application.Features.Destinations;
 public class DestinationService : IDestinationService
 {
     private const int MaxLocationResults = 5;
+    private const int MaxAttractionResults = 20;
 
     private readonly IDestinationProvider _provider;
     private readonly IValidator<SearchLocationsRequest> _searchValidator;
+    private readonly IValidator<GetAttractionsRequest> _attractionsValidator;
 
     public DestinationService(
         IDestinationProvider provider,
-        IValidator<SearchLocationsRequest> searchValidator)
+        IValidator<SearchLocationsRequest> searchValidator,
+        IValidator<GetAttractionsRequest> attractionsValidator)
     {
         _provider = provider;
         _searchValidator = searchValidator;
+        _attractionsValidator = attractionsValidator;
     }
 
     public async Task<IReadOnlyList<LocationSuggestionDto>> SearchLocationsAsync(string query, CancellationToken cancellationToken = default)
@@ -64,11 +68,21 @@ public class DestinationService : IDestinationService
         return loweredName.StartsWith(loweredQuery, StringComparison.Ordinal) ? 1 : 2;
     }
 
-    public Task<IReadOnlyList<DestinationSummaryDto>> GetAttractionsAsync(double latitude, double longitude, double radiusKm, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<DestinationSummaryDto>> GetAttractionsAsync(double latitude, double longitude, double radiusKm, CancellationToken cancellationToken = default)
     {
-        // TODO: F1/US3 — fetch POIs near the coordinate, cap at 20 per page,
-        //       order by popularity/rating, supply placeholders for missing data.
-        throw new NotImplementedException("Implement recommended attractions — see Feature 1, US3.");
+        // F1/US3 — coordinates on the globe, 0 < radius ≤ 50 km (validator -> HTTP 400).
+        await _attractionsValidator.ValidateAndThrowAppExceptionAsync(
+            new GetAttractionsRequest(latitude, longitude, radiusKm), cancellationToken);
+
+        var attractions = await _provider.GetAttractionsAsync(latitude, longitude, radiusKm, cancellationToken);
+
+        // "Recommended" default sort (spec §11.2): rating descending, unrated
+        // last — which with Geoapify (no ratings) degrades to provider order.
+        return attractions
+            .OrderBy(a => a.Rating is null)
+            .ThenByDescending(a => a.Rating)
+            .Take(MaxAttractionResults)
+            .ToList();
     }
 
     public Task<DestinationDetailsDto> GetDetailsAsync(string providerId, CancellationToken cancellationToken = default)

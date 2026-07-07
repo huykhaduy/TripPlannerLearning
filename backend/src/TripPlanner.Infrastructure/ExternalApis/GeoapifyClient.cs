@@ -69,10 +69,35 @@ public class GeoapifyClient : IDestinationProvider
             .ToList();
     }
 
-    public Task<IReadOnlyList<DestinationSummaryDto>> GetAttractionsAsync(double latitude, double longitude, double radiusKm, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<DestinationSummaryDto>> GetAttractionsAsync(double latitude, double longitude, double radiusKm, CancellationToken cancellationToken = default)
     {
-        // TODO: call Geoapify Places (`v2/places`) with a circle filter for POIs near the coordinate.
-        throw new NotImplementedException("Call the Geoapify Places API — see Feature 1, US3.");
+        // Geoapify quirks: the circle filter is LONGITUDE first, and the radius
+        // is in meters. Invariant formatting so "48.85" never becomes "48,85".
+        var radiusMeters = (int)(radiusKm * 1000);
+        var url = FormattableString.Invariant(
+            $"v2/places?categories=tourism.sights,tourism.attraction&filter=circle:{longitude},{latitude},{radiusMeters}&limit=20&apiKey={_settings.ApiKey}");
+
+        using var response = await _httpClient.GetAsync(url, cancellationToken);
+        response.EnsureSuccessStatusCode();
+
+        // Same GeoJSON FeatureCollection shape as place-details, so the wire
+        // records are shared.
+        var payload = await response.Content.ReadFromJsonAsync<PlacesResponse>(cancellationToken);
+        if (payload?.Features is null)
+        {
+            return [];
+        }
+
+        return payload.Features
+            .Select(f => f.Properties)
+            .Where(p => p?.PlaceId is not null) // a POI we can't re-fetch by id is useless downstream
+            .Select(p => new DestinationSummaryDto(
+                ProviderId: p!.PlaceId!,
+                Name: p.Name ?? p.AddressLine1 ?? "Unnamed place",
+                Category: p.Categories?.FirstOrDefault(),
+                ImageUrl: p.WikiAndMedia?.Image,
+                Rating: null)) // Geoapify has no ratings; the UI shows a placeholder
+            .ToList();
     }
 
     public async Task<DestinationDetailsDto?> GetDestinationDetailsAsync(string providerId, CancellationToken cancellationToken = default)
@@ -90,7 +115,7 @@ public class GeoapifyClient : IDestinationProvider
 
         response.EnsureSuccessStatusCode(); // anything else (401, 5xx) is a real fault
 
-        var payload = await response.Content.ReadFromJsonAsync<PlaceDetailsResponse>(cancellationToken);
+        var payload = await response.Content.ReadFromJsonAsync<PlacesResponse>(cancellationToken);
         var place = payload?.Features?.FirstOrDefault()?.Properties;
         if (place is null)
         {
@@ -133,7 +158,9 @@ public class GeoapifyClient : IDestinationProvider
         [property: JsonPropertyName("lat")] double Lat,
         [property: JsonPropertyName("lon")] double Lon);
 
-    private sealed record PlaceDetailsResponse(
+    // Shared by v2/places and v2/place-details — both return a GeoJSON
+    // FeatureCollection with the same properties bag.
+    private sealed record PlacesResponse(
         [property: JsonPropertyName("features")] List<PlaceFeature>? Features);
 
     private sealed record PlaceFeature(
