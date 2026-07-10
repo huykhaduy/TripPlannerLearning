@@ -12,4 +12,21 @@ export interface AuthResponse {
   user: User;
 }
 
-// TODO (students): add Trip / Destination types as you build those features.
+// F1/US1-2 — a city/country autocomplete suggestion (LocationSuggestionDto).
+export interface LocationSuggestion {
+  name: string;
+  country: string | null;
+  latitude: number;
+  longitude: number;
+}
+
+// F1/US3 — a single attraction in the recommended list (DestinationSummaryDto).
+export interface AttractionSummary {
+  providerId: string;
+  name: string;
+  category: string | null;
+  imageUrl: string | null;
+  rating: number | null;
+}
+
+// TODO (students): add Trip types as you build Feature 3.
