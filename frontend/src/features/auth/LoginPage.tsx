@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { Link, Navigate, useNavigate } from 'react-router-dom';
+import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { useAuth } from '../../auth/AuthContext';
 
@@ -7,15 +7,20 @@ import { useAuth } from '../../auth/AuthContext';
 export function LoginPage() {
   const { login, isAuthenticated } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+
+  // US8: a page that redirected here (e.g. "Add to trip" while logged out)
+  // says where to return to; a direct visit falls back to the planner.
+  const from = (location.state as { from?: string } | null)?.from ?? '/trips';
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  // Already signed in — the form makes no sense; go to the planner.
+  // Already signed in — the form makes no sense; go back (or to the planner).
   if (isAuthenticated) {
-    return <Navigate to="/trips" replace />;
+    return <Navigate to={from} replace state={location.state} />;
   }
 
   async function handleSubmit(event: FormEvent) {
@@ -24,7 +29,8 @@ export function LoginPage() {
     setSubmitting(true);
     try {
       await login(email, password);
-      navigate('/trips');
+      // Forward the state so AddToTripButton can resume the pending add.
+      navigate(from, { replace: true, state: location.state });
     } catch (err) {
       // The API returns a ProblemDetails body with a friendly "detail" message.
       const message = axios.isAxiosError(err)

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { getAttractions } from '../../api/destinations';
 import { AddToTripButton } from './AddToTripButton';
 import type { AttractionSummary, LocationSuggestion } from '../../types';
@@ -9,22 +10,28 @@ function AttractionCard({ attraction }: { attraction: AttractionSummary }) {
 
   return (
     <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
-      {showImage ? (
-        <img
-          src={attraction.imageUrl!}
-          alt={attraction.name}
-          onError={() => setImageFailed(true)}
-          className="h-28 w-full object-cover"
-        />
-      ) : (
-        <div className="flex h-28 w-full items-center justify-center bg-slate-100 text-3xl">
-          🏛️
+      {/* F2/US1 — open the details view. Add-to-trip stays outside this link
+          so a button never ends up nested inside an anchor. */}
+      <Link to={`/destinations/${encodeURIComponent(attraction.providerId)}`}>
+        {showImage ? (
+          <img
+            src={attraction.imageUrl!}
+            alt={attraction.name}
+            onError={() => setImageFailed(true)}
+            className="h-28 w-full object-cover"
+          />
+        ) : (
+          <div className="flex h-28 w-full items-center justify-center bg-slate-100 text-3xl">
+            🏛️
+          </div>
+        )}
+        <div className="flex flex-col gap-1 p-3 pb-0 text-sm">
+          <strong>{attraction.name}</strong>
+          {attraction.category && <span className="text-slate-500">{attraction.category}</span>}
+          {attraction.rating != null && <span>⭐ {attraction.rating.toFixed(1)}</span>}
         </div>
-      )}
-      <div className="flex flex-col gap-1 p-3 text-sm">
-        <strong>{attraction.name}</strong>
-        {attraction.category && <span className="text-slate-500">{attraction.category}</span>}
-        {attraction.rating != null && <span>⭐ {attraction.rating.toFixed(1)}</span>}
+      </Link>
+      <div className="p-3 pt-2">
         <AddToTripButton attraction={attraction} />
       </div>
     </div>

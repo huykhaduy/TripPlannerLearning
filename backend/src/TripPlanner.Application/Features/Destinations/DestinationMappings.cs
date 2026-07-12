@@ -22,4 +22,20 @@ public static class DestinationMappings
         Website = details.Website,
         OpeningHours = details.OpeningHours,
     };
+
+    /// <summary>
+    /// F2/US1 fallback path — the cached row survives even when the provider no
+    /// longer knows a place, so a saved-trip destination stays viewable.
+    /// </summary>
+    public static DestinationDetailsDto ToDetailsDto(this Destination destination) => new(
+        ProviderId: destination.ProviderId,
+        Name: destination.Name,
+        Category: destination.Category,
+        Description: destination.Description,
+        ImageUrl: destination.ImageUrl,
+        Latitude: destination.Latitude,
+        Longitude: destination.Longitude,
+        Address: destination.Address,
+        Website: destination.Website,
+        OpeningHours: destination.OpeningHours);
 }

@@ -1,7 +1,10 @@
 using FluentValidation;
+using Microsoft.EntityFrameworkCore;
+using TripPlanner.Application.Common.Exceptions;
 using TripPlanner.Application.Common.Interfaces;
 using TripPlanner.Application.Common.Validation;
 using TripPlanner.Application.Features.Destinations.Dtos;
+using TripPlanner.Domain.Entities;
 
 namespace TripPlanner.Application.Features.Destinations;
 
@@ -22,18 +25,24 @@ public class DestinationService : IDestinationService
     private const int MaxLocationResults = 5;
     private const int MaxAttractionResults = 20;
 
+    private readonly IApplicationDbContext _db;
     private readonly IDestinationProvider _provider;
     private readonly IValidator<SearchLocationsRequest> _searchValidator;
     private readonly IValidator<GetAttractionsRequest> _attractionsValidator;
+    private readonly IValidator<GetDestinationDetailsRequest> _detailsValidator;
 
     public DestinationService(
+        IApplicationDbContext db,
         IDestinationProvider provider,
         IValidator<SearchLocationsRequest> searchValidator,
-        IValidator<GetAttractionsRequest> attractionsValidator)
+        IValidator<GetAttractionsRequest> attractionsValidator,
+        IValidator<GetDestinationDetailsRequest> detailsValidator)
     {
+        _db = db;
         _provider = provider;
         _searchValidator = searchValidator;
         _attractionsValidator = attractionsValidator;
+        _detailsValidator = detailsValidator;
     }
 
     public async Task<IReadOnlyList<LocationSuggestionDto>> SearchLocationsAsync(string query, CancellationToken cancellationToken = default)
@@ -85,10 +94,36 @@ public class DestinationService : IDestinationService
             .ToList();
     }
 
-    public Task<DestinationDetailsDto> GetDetailsAsync(string providerId, CancellationToken cancellationToken = default)
+    public async Task<DestinationDetailsDto> GetDetailsAsync(string providerId, CancellationToken cancellationToken = default)
     {
-        // TODO: F2/US1 — fetch full details by provider id; the view must still
-        //       open when optional fields (photos/hours/map) are missing.
-        throw new NotImplementedException("Implement destination details — see Feature 2, US1.");
+        await _detailsValidator.ValidateAndThrowAppExceptionAsync(
+            new GetDestinationDetailsRequest(providerId), cancellationToken);
+
+        // F2/US1 (spec §11.3): the provider has the freshest data, but it can
+        // say "no such place" (null) or be unreachable (throws) — either way we
+        // fall back to our own cache, never persisting here (DestinationService
+        // never writes; only TripService.AddDestinationAsync upserts).
+        DestinationDetailsDto? details;
+        try
+        {
+            details = await _provider.GetDestinationDetailsAsync(providerId, cancellationToken);
+        }
+        catch (HttpRequestException)
+        {
+            details = null;
+        }
+
+        if (details is not null)
+        {
+            return details;
+        }
+
+        // Saved-trip destinations must stay viewable even if the provider forgets
+        // them (§8.4's snapshot rationale) — only a miss on BOTH sources is 404.
+        var cached = await _db.Destinations
+            .AsNoTracking()
+            .FirstOrDefaultAsync(d => d.ProviderId == providerId, cancellationToken);
+
+        return cached?.ToDetailsDto() ?? throw new NotFoundException(nameof(Destination), providerId);
     }
 }

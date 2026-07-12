@@ -1,7 +1,7 @@
 import { apiClient } from './client';
-import type { AttractionSummary, LocationSuggestion } from '../types';
+import type { AttractionSummary, DestinationDetails, LocationSuggestion } from '../types';
 
-// Calls to the Destination search endpoints (Feature 1). Public — no JWT needed.
+// Calls to the Destination search & details endpoints (Features 1 & 2). Public — no JWT needed.
 
 export async function searchLocations(query: string): Promise<LocationSuggestion[]> {
   const { data } = await apiClient.get<LocationSuggestion[]>('/destinations/locations', {
@@ -18,5 +18,12 @@ export async function getAttractions(
   const { data } = await apiClient.get<AttractionSummary[]>('/destinations/attractions', {
     params: { lat, lng, radiusKm },
   });
+  return data;
+}
+
+export async function getDestinationDetails(providerId: string): Promise<DestinationDetails> {
+  const { data } = await apiClient.get<DestinationDetails>(
+    `/destinations/${encodeURIComponent(providerId)}`,
+  );
   return data;
 }

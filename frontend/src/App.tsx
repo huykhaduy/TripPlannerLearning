@@ -4,6 +4,7 @@ import { ProtectedRoute } from './auth/ProtectedRoute';
 import { LoginPage } from './features/auth/LoginPage';
 import { RegisterPage } from './features/auth/RegisterPage';
 import { SearchPage } from './features/destinations/SearchPage';
+import { DestinationDetailsPage } from './features/destinations/DestinationDetailsPage';
 import { TripsPage } from './features/trips/TripsPage';
 import { TripDetailPage } from './features/trips/TripDetailPage';
 
@@ -38,6 +39,7 @@ export default function App() {
       <main className="mx-auto max-w-2xl px-4 py-8">
         <Routes>
           <Route path="/" element={<SearchPage />} />
+          <Route path="/destinations/:providerId" element={<DestinationDetailsPage />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
 

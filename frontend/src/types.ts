@@ -29,6 +29,20 @@ export interface AttractionSummary {
   rating: number | null;
 }
 
+// F2/US1 — full details for a single destination (DestinationDetailsDto).
+export interface DestinationDetails {
+  providerId: string;
+  name: string;
+  category: string | null;
+  description: string | null;
+  imageUrl: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  address: string | null;
+  website: string | null;
+  openingHours: string | null;
+}
+
 // F3/US10 — summary row in the trip list (TripSummaryDto).
 export interface TripSummary {
   id: string;

@@ -1,20 +1,28 @@
+using Microsoft.EntityFrameworkCore;
 using Moq;
 using TripPlanner.Application.Common.Exceptions;
 using TripPlanner.Application.Common.Interfaces;
 using TripPlanner.Application.Features.Destinations;
 using TripPlanner.Application.Features.Destinations.Dtos;
 using TripPlanner.Application.Features.Destinations.Validators;
+using TripPlanner.Infrastructure.Persistence;
 using Xunit;
 
 namespace TripPlanner.Application.Tests.Destinations;
 
 /// <summary>
-/// Unit tests for the search half of Feature 1 (US1/US2). No database needed:
-/// the service's dependencies are just the provider (mocked — we never hit the
-/// real Geoapify API in tests) and the validator (real — it's pure logic).
+/// Unit tests for Feature 1 (US1-3 search/attractions) and Feature 2 (US1
+/// details). The service's dependencies are the provider (mocked — we never
+/// hit the real Geoapify API in tests), the validators (real — pure logic),
+/// and for GetDetailsAsync's DB fallback, an in-memory EF Core database.
 /// </summary>
 public class DestinationServiceTests
 {
+    private static ApplicationDbContext CreateDb() =>
+        new(new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase(databaseName: Guid.NewGuid().ToString())
+            .Options);
+
     /// <summary>
     /// Builds the service with a mocked provider that returns
     /// <paramref name="providerResults"/> for ANY query.
@@ -26,7 +34,7 @@ public class DestinationServiceTests
             .Setup(p => p.SearchLocationsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(providerResults);
 
-        return CreateSut(provider);
+        return CreateSut(CreateDb(), provider);
     }
 
     /// <summary>As above, but the provider returns attractions (F1/US3 tests).</summary>
@@ -38,11 +46,13 @@ public class DestinationServiceTests
                 It.IsAny<double>(), It.IsAny<double>(), It.IsAny<double>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(providerResults);
 
-        return CreateSut(provider);
+        return CreateSut(CreateDb(), provider);
     }
 
-    private static DestinationService CreateSut(Mock<IDestinationProvider> provider) =>
-        new(provider.Object, new SearchLocationsRequestValidator(), new GetAttractionsRequestValidator());
+    private static DestinationService CreateSut(ApplicationDbContext db, Mock<IDestinationProvider> provider) =>
+        new(db, provider.Object,
+            new SearchLocationsRequestValidator(), new GetAttractionsRequestValidator(),
+            new GetDestinationDetailsRequestValidator());
 
     /// <summary>Shorthand — coordinates don't matter for these tests.</summary>
     private static LocationSuggestionDto Suggestion(string name, string? country = null) =>
@@ -113,7 +123,7 @@ public class DestinationServiceTests
         provider
             .Setup(p => p.SearchLocationsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync([]);
-        var sut = CreateSut(provider);
+        var sut = CreateSut(CreateDb(), provider);
 
         await sut.SearchLocationsAsync("  paris  ");
 
@@ -181,5 +191,102 @@ public class DestinationServiceTests
 
         await Assert.ThrowsAsync<ValidationException>(() =>
             sut.GetAttractionsAsync(latitude, longitude, radiusKm));
+    }
+
+    // ------------------------------------------------------------------
+    // F2/US1 — GetDetailsAsync
+    // ------------------------------------------------------------------
+
+    private static Mock<IDestinationProvider> ProviderReturning(DestinationDetailsDto? details)
+    {
+        var provider = new Mock<IDestinationProvider>();
+        provider
+            .Setup(p => p.GetDestinationDetailsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(details);
+        return provider;
+    }
+
+    private static Mock<IDestinationProvider> ProviderThatIsDown()
+    {
+        var provider = new Mock<IDestinationProvider>();
+        provider
+            .Setup(p => p.GetDestinationDetailsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new HttpRequestException("simulated outage"));
+        return provider;
+    }
+
+    [Fact]
+    public async Task GetDetailsAsync_WhenProviderHasTheDestination_ReturnsProviderData()
+    {
+        var details = new DestinationDetailsDto(
+            "geo-1", "Golden Bridge", "tourism", "A hand-shaped bridge.", "img.jpg",
+            15.9, 108.0, "Da Nang", "https://example.com", "9am-5pm");
+        var sut = CreateSut(CreateDb(), ProviderReturning(details));
+
+        var result = await sut.GetDetailsAsync("geo-1");
+
+        Assert.Equal("Golden Bridge", result.Name);
+        Assert.Equal("A hand-shaped bridge.", result.Description);
+    }
+
+    [Fact]
+    public async Task GetDetailsAsync_WhenProviderReturnsNull_FallsBackToCachedRow()
+    {
+        using var db = CreateDb();
+        db.Destinations.Add(new Domain.Entities.Destination
+        {
+            ProviderId = "geo-1", Name = "Golden Bridge (cached)", Category = "tourism",
+        });
+        await db.SaveChangesAsync();
+        var sut = CreateSut(db, ProviderReturning(null));
+
+        var result = await sut.GetDetailsAsync("geo-1");
+
+        Assert.Equal("Golden Bridge (cached)", result.Name);
+    }
+
+    [Fact]
+    public async Task GetDetailsAsync_WhenProviderIsDown_FallsBackToCachedRow()
+    {
+        using var db = CreateDb();
+        db.Destinations.Add(new Domain.Entities.Destination { ProviderId = "geo-1", Name = "Golden Bridge (cached)" });
+        await db.SaveChangesAsync();
+        var sut = CreateSut(db, ProviderThatIsDown());
+
+        var result = await sut.GetDetailsAsync("geo-1");
+
+        Assert.Equal("Golden Bridge (cached)", result.Name);
+    }
+
+    [Fact]
+    public async Task GetDetailsAsync_WhenBothProviderAndCacheMiss_ThrowsNotFound()
+    {
+        var sut = CreateSut(CreateDb(), ProviderReturning(null));
+
+        await Assert.ThrowsAsync<NotFoundException>(() => sut.GetDetailsAsync("unknown-id"));
+    }
+
+    [Fact]
+    public async Task GetDetailsAsync_NeverPersistsToTheCache()
+    {
+        // DestinationService (search/details) never writes rows — only
+        // TripService.AddDestinationAsync upserts, on first add to a trip.
+        using var db = CreateDb();
+        var details = new DestinationDetailsDto("geo-1", "Golden Bridge", null, null, null, null, null, null, null, null);
+        var sut = CreateSut(db, ProviderReturning(details));
+
+        await sut.GetDetailsAsync("geo-1");
+
+        Assert.Equal(0, await db.Destinations.CountAsync());
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task GetDetailsAsync_WithBlankProviderId_ThrowsValidation(string providerId)
+    {
+        var sut = CreateSut(CreateDb(), ProviderReturning(null));
+
+        await Assert.ThrowsAsync<ValidationException>(() => sut.GetDetailsAsync(providerId));
     }
 }

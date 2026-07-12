@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { useAuth } from '../../auth/AuthContext';
 import { getMyTrips, getTrip, addDestination } from '../../api/trips';
@@ -13,13 +13,31 @@ import type { AttractionSummary, ItineraryDay, TripSummary } from '../../types';
 export function AddToTripButton({ attraction }: { attraction: AttractionSummary }) {
   const { isAuthenticated } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const [open, setOpen] = useState(false);
   const [justAdded, setJustAdded] = useState(false);
 
+  // US8 resume: LoginPage forwards our state back here after sign-in. The
+  // providerId check matters — the search page renders one button per
+  // attraction, and only the one the user originally clicked should open.
+  useEffect(() => {
+    const state = location.state as { resumeAddId?: string } | null;
+    if (isAuthenticated && state?.resumeAddId === attraction.providerId) {
+      setOpen(true);
+      // Clear the note so refresh/back doesn't re-open the dialog.
+      navigate(location.pathname, { replace: true, state: null });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthenticated, location.state]);
+
   function handleClick() {
     if (!isAuthenticated) {
-      navigate('/login'); // US8: prompt login when trying to add while logged out
+      // US8: prompt login, remembering where we were and what the user was
+      // trying to add so the flow can resume after sign-in.
+      navigate('/login', {
+        state: { from: location.pathname, resumeAddId: attraction.providerId },
+      });
       return;
     }
     setOpen(true);

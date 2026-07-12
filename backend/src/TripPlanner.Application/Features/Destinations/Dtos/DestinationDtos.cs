@@ -6,6 +6,9 @@ public record SearchLocationsRequest(string Query);
 /// <summary>F1/US3 — attraction lookup inputs, wrapped so they can be validated.</summary>
 public record GetAttractionsRequest(double Latitude, double Longitude, double RadiusKm);
 
+/// <summary>F2/US1 — details lookup input, wrapped so it can be validated.</summary>
+public record GetDestinationDetailsRequest(string ProviderId);
+
 /// <summary>F1/US1 &amp; US2 — a city/country autocomplete suggestion.</summary>
 public record LocationSuggestionDto(string Name, string? Country, double Latitude, double Longitude);
 
