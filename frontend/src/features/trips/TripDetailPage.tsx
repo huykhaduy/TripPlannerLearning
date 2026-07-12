@@ -1,31 +1,105 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import axios from 'axios';
-import { getTrip, removeDestination, updateTrip } from '../../api/trips';
+import { getTrip, removeDestination, updateItineraryItem, updateTrip } from '../../api/trips';
 import type { TripDestination, TripDetail } from '../../types';
 
-function DestinationRow({
-  destination,
+/**
+ * F3/US4-US6 — one drop-enabled bucket (a day, or Saved Places when dayId is
+ * null). Dropping on a row inserts at that row's position; dropping on the
+ * surrounding area appends to the end.
+ */
+function DestinationList({
+  dayId,
+  destinations,
+  emptyHint,
   onRemove,
-  removing,
+  removingItemId,
+  onDragStart,
+  onDragEnd,
+  onDrop,
 }: {
-  destination: TripDestination;
+  dayId: string | null;
+  destinations: TripDestination[];
+  emptyHint: string;
   onRemove: (itemId: string) => void;
-  removing: boolean;
+  removingItemId: string | null;
+  onDragStart: (itemId: string) => void;
+  onDragEnd: () => void;
+  onDrop: (targetDayId: string | null, position: number) => void;
 }) {
   return (
-    <li className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 px-3 py-2">
-      <span>{destination.name}</span>
-      <button
-        type="button"
-        onClick={() => onRemove(destination.itemId)}
-        disabled={removing}
-        className="rounded-lg border border-red-200 px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
-      >
-        {removing ? 'Removing…' : 'Remove'}
-      </button>
-    </li>
+    <div
+      onDragOver={(e) => e.preventDefault()} // required, or the browser refuses the drop
+      onDrop={() => onDrop(dayId, destinations.length)}
+    >
+      {destinations.length === 0 ? (
+        <p className="mt-2 rounded-lg border border-dashed border-slate-300 px-3 py-2 text-sm text-slate-500">
+          {emptyHint}
+        </p>
+      ) : (
+        <ul className="mt-2 flex flex-col gap-2">
+          {destinations.map((destination, index) => (
+            <li
+              key={destination.itemId}
+              draggable
+              onDragStart={() => onDragStart(destination.itemId)}
+              onDragEnd={onDragEnd}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => {
+                e.stopPropagation(); // this drop is ours — don't also append via the list handler
+                onDrop(dayId, index);
+              }}
+              className="flex cursor-grab items-center justify-between gap-2 rounded-lg border border-slate-200 px-3 py-2 active:cursor-grabbing"
+            >
+              <span>{destination.name}</span>
+              <button
+                type="button"
+                onClick={() => onRemove(destination.itemId)}
+                disabled={removingItemId === destination.itemId}
+                className="rounded-lg border border-red-200 px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {removingItemId === destination.itemId ? 'Removing…' : 'Remove'}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
+}
+
+/**
+ * Optimistic mirror of the backend's move semantics (US4-US6): pull the item
+ * out of every bucket, insert it at the requested position in the target, and
+ * renumber both buckets densely. The server confirms the same state.
+ */
+function moveLocally(
+  trip: TripDetail,
+  itemId: string,
+  targetDayId: string | null,
+  position: number,
+): TripDetail {
+  const item = [...trip.savedPlaces, ...trip.days.flatMap((d) => d.destinations)].find(
+    (d) => d.itemId === itemId,
+  );
+  if (!item) return trip;
+
+  const without = (list: TripDestination[]) => list.filter((d) => d.itemId !== itemId);
+  const insertInto = (list: TripDestination[]) => {
+    const next = [...list];
+    next.splice(Math.min(position, next.length), 0, item);
+    return next.map((d, i) => ({ ...d, sortOrder: i }));
+  };
+
+  return {
+    ...trip,
+    days: trip.days.map((day) => {
+      const rest = without(day.destinations);
+      return { ...day, destinations: day.id === targetDayId ? insertInto(rest) : rest };
+    }),
+    savedPlaces: targetDayId === null ? insertInto(without(trip.savedPlaces)) : without(trip.savedPlaces),
+  };
 }
 
 /** F3/US2, US7, US9 & US10 — day-by-day itinerary, Saved Places, edit name/dates. */
@@ -44,6 +118,9 @@ export function TripDetailPage() {
 
   const [removingItemId, setRemovingItemId] = useState<string | null>(null);
   const [removeError, setRemoveError] = useState<string | null>(null);
+
+  const [dragItemId, setDragItemId] = useState<string | null>(null);
+  const [moveError, setMoveError] = useState<string | null>(null);
 
   // Sync both the page and the edit form from a freshly fetched/saved trip.
   function applyTrip(fresh: TripDetail) {
@@ -106,6 +183,27 @@ export function TripDetailPage() {
       setSaveError(message);
     } finally {
       setSaving(false);
+    }
+  }
+
+  // F3/US4-US6 with NFR4 (DnD ≤ 100 ms): apply the move to local state
+  // immediately, let the API confirm in the background, roll back on error.
+  async function handleDrop(targetDayId: string | null, position: number) {
+    if (!tripId || !trip || !dragItemId) return;
+    const itemId = dragItemId;
+    setDragItemId(null);
+
+    const snapshot = trip;
+    setMoveError(null);
+    setTrip(moveLocally(trip, itemId, targetDayId, position));
+    try {
+      await updateItineraryItem(tripId, itemId, targetDayId, position);
+    } catch (err) {
+      setTrip(snapshot); // roll back the optimistic move
+      const message = axios.isAxiosError(err)
+        ? (err.response?.data?.detail ?? 'Could not move the destination.')
+        : 'Could not move the destination.';
+      setMoveError(message);
     }
   }
 
@@ -200,6 +298,7 @@ export function TripDetailPage() {
       </form>
 
       {removeError && <p className="mt-4 text-sm text-red-600">{removeError}</p>}
+      {moveError && <p className="mt-4 text-sm text-red-600">{moveError}</p>}
 
       {trip.days.length === 0 ? (
         <p className="mt-6 text-sm text-slate-500">
@@ -211,42 +310,32 @@ export function TripDetailPage() {
             <h2 className="text-lg font-semibold">
               Day {day.dayNumber} <span className="font-normal text-slate-500">{day.date}</span>
             </h2>
-            {day.destinations.length === 0 ? (
-              <p className="mt-2 text-sm text-slate-500">Nothing planned yet.</p>
-            ) : (
-              <ul className="mt-2 flex flex-col gap-2">
-                {day.destinations.map((destination) => (
-                  <DestinationRow
-                    key={destination.itemId}
-                    destination={destination}
-                    onRemove={handleRemove}
-                    removing={removingItemId === destination.itemId}
-                  />
-                ))}
-              </ul>
-            )}
+            <DestinationList
+              dayId={day.id}
+              destinations={day.destinations}
+              emptyHint="Nothing planned yet — drag a destination here."
+              onRemove={handleRemove}
+              removingItemId={removingItemId}
+              onDragStart={setDragItemId}
+              onDragEnd={() => setDragItemId(null)}
+              onDrop={handleDrop}
+            />
           </section>
         ))
       )}
 
       <section className="mt-6 border-t border-slate-200 pt-4">
         <h2 className="text-lg font-semibold">Saved Places</h2>
-        {trip.savedPlaces.length === 0 ? (
-          <p className="mt-2 text-sm text-slate-500">
-            No saved places — add destinations from the Discover page.
-          </p>
-        ) : (
-          <ul className="mt-2 flex flex-col gap-2">
-            {trip.savedPlaces.map((destination) => (
-              <DestinationRow
-                key={destination.itemId}
-                destination={destination}
-                onRemove={handleRemove}
-                removing={removingItemId === destination.itemId}
-              />
-            ))}
-          </ul>
-        )}
+        <DestinationList
+          dayId={null}
+          destinations={trip.savedPlaces}
+          emptyHint="No saved places — add destinations from the Discover page."
+          onRemove={handleRemove}
+          removingItemId={removingItemId}
+          onDragStart={setDragItemId}
+          onDragEnd={() => setDragItemId(null)}
+          onDrop={handleDrop}
+        />
       </section>
     </div>
   );

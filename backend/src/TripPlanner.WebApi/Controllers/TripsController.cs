@@ -46,6 +46,11 @@ public class TripsController : ControllerBase
     public async Task<ActionResult<TripDestinationDto>> AddDestination(Guid tripId, AddDestinationRequest request, CancellationToken cancellationToken)
         => Ok(await _tripService.AddDestinationAsync(tripId, request, cancellationToken));
 
+    /// <summary>F3/US4-US6 — schedule, reorder or move an item (null day = Saved Places).</summary>
+    [HttpPut("{tripId:guid}/destinations/{itemId:guid}")]
+    public async Task<ActionResult<TripDestinationDto>> UpdateItineraryItem(Guid tripId, Guid itemId, UpdateItineraryItemRequest request, CancellationToken cancellationToken)
+        => Ok(await _tripService.UpdateItineraryItemAsync(tripId, itemId, request, cancellationToken));
+
     [HttpDelete("{tripId:guid}/destinations/{itemId:guid}")]
     public async Task<IActionResult> RemoveDestination(Guid tripId, Guid itemId, CancellationToken cancellationToken)
     {

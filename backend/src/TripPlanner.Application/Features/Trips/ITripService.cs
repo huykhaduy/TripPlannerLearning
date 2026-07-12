@@ -20,5 +20,7 @@ public interface ITripService
 
     Task<TripDestinationDto> AddDestinationAsync(Guid tripId, AddDestinationRequest request, CancellationToken cancellationToken = default);
 
+    Task<TripDestinationDto> UpdateItineraryItemAsync(Guid tripId, Guid itemId, UpdateItineraryItemRequest request, CancellationToken cancellationToken = default);
+
     Task RemoveDestinationAsync(Guid tripId, Guid itemId, CancellationToken cancellationToken = default);
 }

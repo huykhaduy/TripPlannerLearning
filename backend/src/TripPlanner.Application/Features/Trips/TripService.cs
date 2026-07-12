@@ -29,6 +29,7 @@ public class TripService : ITripService
     private readonly IValidator<CreateTripRequest> _createTripValidator;
     private readonly IValidator<UpdateTripRequest> _updateTripValidator;
     private readonly IValidator<AddDestinationRequest> _addDestinationValidator;
+    private readonly IValidator<UpdateItineraryItemRequest> _updateItemValidator;
 
     public TripService(
         IApplicationDbContext db,
@@ -36,7 +37,8 @@ public class TripService : ITripService
         IDestinationProvider destinationProvider,
         IValidator<CreateTripRequest> createTripValidator,
         IValidator<UpdateTripRequest> updateTripValidator,
-        IValidator<AddDestinationRequest> addDestinationValidator)
+        IValidator<AddDestinationRequest> addDestinationValidator,
+        IValidator<UpdateItineraryItemRequest> updateItemValidator)
     {
         _db = db;
         _currentUser = currentUser;
@@ -44,6 +46,7 @@ public class TripService : ITripService
         _createTripValidator = createTripValidator;
         _updateTripValidator = updateTripValidator;
         _addDestinationValidator = addDestinationValidator;
+        _updateItemValidator = updateItemValidator;
     }
 
     public async Task<IReadOnlyList<TripSummaryDto>> GetMyTripsAsync(CancellationToken cancellationToken = default)
@@ -222,9 +225,79 @@ public class TripService : ITripService
         return item.ToDestinationDto();
     }
 
+    public async Task<TripDestinationDto> UpdateItineraryItemAsync(Guid tripId, Guid itemId, UpdateItineraryItemRequest request, CancellationToken cancellationToken = default)
+    {
+        await _updateItemValidator.ValidateAndThrowAppExceptionAsync(request, cancellationToken);
+
+        var userId = _currentUser.GetRequiredUserId();
+
+        // All items load because resequencing touches BOTH buckets (source and
+        // target); Destination loads because the response DTO reads it.
+        var trip = await _db.Trips
+            .Include(t => t.Items).ThenInclude(i => i.Destination)
+            .FirstOrDefaultAsync(t => t.Id == tripId && t.UserId == userId, cancellationToken)
+            ?? throw new NotFoundException(nameof(Trip), tripId);
+
+        var item = trip.Items.FirstOrDefault(i => i.Id == itemId)
+            ?? throw new NotFoundException(nameof(ItineraryItem), itemId);
+
+        await EnsureDayBelongsToTripAsync(request.ItineraryDayId, trip.Id, cancellationToken);
+
+        // Duplicate rule on the TARGET day (US4/US6) — the moved item itself is
+        // exempt, so reordering within the same day passes this check.
+        if (trip.Items.Any(i => i.Id != item.Id
+                && i.DestinationId == item.DestinationId
+                && i.ItineraryDayId == request.ItineraryDayId))
+        {
+            throw new ConflictException("This destination is already in that part of the trip.");
+        }
+
+        var sourceDayId = item.ItineraryDayId;
+        item.ItineraryDayId = request.ItineraryDayId;
+
+        // Spec §11.1 US4-US6: insert at the requested position, then renumber
+        // 0..n so values stay dense. Clamp so "position 99" means "last".
+        var target = trip.Items
+            .Where(i => i.Id != item.Id && i.ItineraryDayId == request.ItineraryDayId)
+            .OrderBy(i => i.SortOrder)
+            .ToList();
+        target.Insert(Math.Min(request.SortOrder, target.Count), item);
+        Resequence(target);
+
+        // The bucket the item left keeps its relative order but closes the gap.
+        if (sourceDayId != request.ItineraryDayId)
+        {
+            Resequence(trip.Items
+                .Where(i => i.Id != item.Id && i.ItineraryDayId == sourceDayId)
+                .OrderBy(i => i.SortOrder)
+                .ToList());
+        }
+
+        try
+        {
+            await _db.SaveChangesAsync(cancellationToken); // single save: both buckets move atomically
+        }
+        catch (DbUpdateException)
+        {
+            // Unique index (ItineraryDayId, DestinationId): a concurrent request
+            // put the same destination into the target day between check and save.
+            throw new ConflictException("This destination is already in that part of the trip.");
+        }
+
+        return item.ToDestinationDto();
+    }
+
+    private static void Resequence(List<ItineraryItem> bucket)
+    {
+        for (var position = 0; position < bucket.Count; position++)
+        {
+            bucket[position].SortOrder = position;
+        }
+    }
+
     /// <summary>
     /// A target day, when given, must exist and belong to THIS trip
-    /// (spec §11.1 rule 2). Also used by the future schedule/move endpoint.
+    /// (spec §11.1 rule 2). Also used by the schedule/move endpoint (US4-US6).
     /// </summary>
     private async Task EnsureDayBelongsToTripAsync(Guid? itineraryDayId, Guid tripId, CancellationToken cancellationToken)
     {

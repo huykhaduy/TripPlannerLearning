@@ -9,6 +9,12 @@ public record UpdateTripRequest(string Name, DateOnly? StartDate, DateOnly? EndD
 /// <summary>F3/US3 — add a destination to a trip, optionally into a specific day.</summary>
 public record AddDestinationRequest(string ProviderId, Guid? ItineraryDayId);
 
+/// <summary>
+/// F3/US4-US6 — schedule, reorder or move an itinerary item. Null day means
+/// Saved Places; SortOrder is the desired position within the target bucket.
+/// </summary>
+public record UpdateItineraryItemRequest(Guid? ItineraryDayId, int SortOrder);
+
 /// <summary>Summary row for the user's trip list (F3/US10).</summary>
 public record TripSummaryDto(Guid Id, string Name, DateOnly? StartDate, DateOnly? EndDate, int DestinationCount);
 

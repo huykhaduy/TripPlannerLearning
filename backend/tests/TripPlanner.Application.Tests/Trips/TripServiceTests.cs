@@ -25,7 +25,7 @@ public class TripServiceTests
 
         return new TripService(db, currentUser.Object, provider ?? Mock.Of<IDestinationProvider>(),
             new CreateTripRequestValidator(), new UpdateTripRequestValidator(),
-            new AddDestinationRequestValidator());
+            new AddDestinationRequestValidator(), new UpdateItineraryItemRequestValidator());
     }
 
     /// <summary>Provider stub that knows one place; returns null for anything else.</summary>
@@ -309,6 +309,153 @@ public class TripServiceTests
         await Assert.ThrowsAsync<NotFoundException>(() =>
             stranger.RemoveDestinationAsync(trip.Id, item.ItemId));
         Assert.Equal(1, await db.ItineraryItems.CountAsync()); // nothing deleted
+    }
+
+    /// <summary>
+    /// Seeds a 2-day trip with two saved places and one scheduled item:
+    /// Day 1: [Citadel] — Saved Places: [Pagoda(0), River(1)].
+    /// </summary>
+    private static async Task<(TripService Sut, TripDetailDto Trip)> SeedTripForMoveTestsAsync(ApplicationDbContext db)
+    {
+        var provider = ProviderKnowing("geo-pagoda", "Thien Mu Pagoda");
+        provider
+            .Setup(p => p.GetDestinationDetailsAsync("geo-river", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DestinationDetailsDto(
+                "geo-river", "Perfume River", null, null, null, null, null, null, null, null));
+        provider
+            .Setup(p => p.GetDestinationDetailsAsync("geo-citadel", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DestinationDetailsDto(
+                "geo-citadel", "Imperial Citadel", null, null, null, null, null, null, null, null));
+
+        var sut = CreateSut(db, Guid.NewGuid(), provider.Object);
+        var created = await sut.CreateTripAsync(new CreateTripRequest("Hue"));
+        var trip = await sut.UpdateTripAsync(created.Id, new UpdateTripRequest(
+            "Hue", new DateOnly(2026, 8, 1), new DateOnly(2026, 8, 2)));
+
+        await sut.AddDestinationAsync(trip.Id, new AddDestinationRequest("geo-pagoda", null));
+        await sut.AddDestinationAsync(trip.Id, new AddDestinationRequest("geo-river", null));
+        await sut.AddDestinationAsync(trip.Id, new AddDestinationRequest("geo-citadel", trip.Days[0].Id));
+
+        return (sut, await sut.GetTripAsync(trip.Id));
+    }
+
+    [Fact]
+    public async Task UpdateItineraryItemAsync_SavedPlaceToDay_SchedulesAndResequencesSource()
+    {
+        using var db = CreateDb();
+        var (sut, trip) = await SeedTripForMoveTestsAsync(db);
+        var pagoda = trip.SavedPlaces[0]; // SortOrder 0; River is 1
+
+        var result = await sut.UpdateItineraryItemAsync(trip.Id, pagoda.ItemId,
+            new UpdateItineraryItemRequest(trip.Days[0].Id, 1));
+
+        Assert.Equal(1, result.SortOrder); // after Citadel (0)
+
+        var after = await sut.GetTripAsync(trip.Id);
+        Assert.Equal( // target day: Citadel then Pagoda
+            new[] { "Imperial Citadel", "Thien Mu Pagoda" },
+            after.Days[0].Destinations.Select(d => d.Name));
+        var river = Assert.Single(after.SavedPlaces); // source bucket closed the gap
+        Assert.Equal("Perfume River", river.Name);
+        Assert.Equal(0, river.SortOrder);
+    }
+
+    [Fact]
+    public async Task UpdateItineraryItemAsync_ReorderWithinBucket_MovesToRequestedPosition()
+    {
+        using var db = CreateDb();
+        var (sut, trip) = await SeedTripForMoveTestsAsync(db);
+        var river = trip.SavedPlaces[1]; // [Pagoda(0), River(1)] -> move River to front
+
+        await sut.UpdateItineraryItemAsync(trip.Id, river.ItemId,
+            new UpdateItineraryItemRequest(null, 0));
+
+        var after = await sut.GetTripAsync(trip.Id);
+        Assert.Equal(
+            new[] { "Perfume River", "Thien Mu Pagoda" },
+            after.SavedPlaces.Select(d => d.Name));
+        Assert.Equal(new[] { 0, 1 }, after.SavedPlaces.Select(d => d.SortOrder)); // dense
+    }
+
+    [Fact]
+    public async Task UpdateItineraryItemAsync_DayToSavedPlaces_AppendsAtClampedPosition()
+    {
+        using var db = CreateDb();
+        var (sut, trip) = await SeedTripForMoveTestsAsync(db);
+        var citadel = trip.Days[0].Destinations[0];
+
+        // Position far past the end is clamped to "last".
+        var result = await sut.UpdateItineraryItemAsync(trip.Id, citadel.ItemId,
+            new UpdateItineraryItemRequest(null, 99));
+
+        Assert.Equal(2, result.SortOrder); // after Pagoda(0) and River(1)
+
+        var after = await sut.GetTripAsync(trip.Id);
+        Assert.Empty(after.Days[0].Destinations);
+        Assert.Equal(3, after.SavedPlaces.Count);
+    }
+
+    [Fact]
+    public async Task UpdateItineraryItemAsync_DestinationAlreadyInTargetDay_ThrowsConflict()
+    {
+        using var db = CreateDb();
+        var (sut, trip) = await SeedTripForMoveTestsAsync(db);
+        // Put a second Citadel item into Saved Places, then try to move it into
+        // Day 1, which already holds the Citadel.
+        var duplicate = await sut.AddDestinationAsync(trip.Id, new AddDestinationRequest("geo-citadel", null));
+
+        await Assert.ThrowsAsync<ConflictException>(() =>
+            sut.UpdateItineraryItemAsync(trip.Id, duplicate.ItemId,
+                new UpdateItineraryItemRequest(trip.Days[0].Id, 0)));
+    }
+
+    [Fact]
+    public async Task UpdateItineraryItemAsync_DayOfAnotherTrip_ThrowsValidation()
+    {
+        using var db = CreateDb();
+        var (sut, trip) = await SeedTripForMoveTestsAsync(db);
+        var otherTrip = await sut.UpdateTripAsync(
+            (await sut.CreateTripAsync(new CreateTripRequest("Other"))).Id,
+            new UpdateTripRequest("Other", new DateOnly(2026, 9, 1), new DateOnly(2026, 9, 1)));
+
+        await Assert.ThrowsAsync<ValidationException>(() =>
+            sut.UpdateItineraryItemAsync(trip.Id, trip.SavedPlaces[0].ItemId,
+                new UpdateItineraryItemRequest(otherTrip.Days[0].Id, 0)));
+    }
+
+    [Fact]
+    public async Task UpdateItineraryItemAsync_NegativeSortOrder_ThrowsValidation()
+    {
+        using var db = CreateDb();
+        var (sut, trip) = await SeedTripForMoveTestsAsync(db);
+
+        await Assert.ThrowsAsync<ValidationException>(() =>
+            sut.UpdateItineraryItemAsync(trip.Id, trip.SavedPlaces[0].ItemId,
+                new UpdateItineraryItemRequest(null, -1)));
+    }
+
+    [Fact]
+    public async Task UpdateItineraryItemAsync_TripOfAnotherUser_ThrowsNotFound()
+    {
+        using var db = CreateDb();
+        var (_, trip) = await SeedTripForMoveTestsAsync(db);
+
+        var stranger = CreateSut(db, Guid.NewGuid());
+
+        await Assert.ThrowsAsync<NotFoundException>(() =>
+            stranger.UpdateItineraryItemAsync(trip.Id, trip.SavedPlaces[0].ItemId,
+                new UpdateItineraryItemRequest(null, 0)));
+    }
+
+    [Fact]
+    public async Task UpdateItineraryItemAsync_UnknownItem_ThrowsNotFound()
+    {
+        using var db = CreateDb();
+        var (sut, trip) = await SeedTripForMoveTestsAsync(db);
+
+        await Assert.ThrowsAsync<NotFoundException>(() =>
+            sut.UpdateItineraryItemAsync(trip.Id, Guid.NewGuid(),
+                new UpdateItineraryItemRequest(null, 0)));
     }
 
     [Fact]

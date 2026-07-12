@@ -44,6 +44,21 @@ export async function addDestination(
   return data;
 }
 
+// F3/US4-US6 — schedule, reorder or move an item. Null day = Saved Places;
+// sortOrder is the desired position within the target day/bucket.
+export async function updateItineraryItem(
+  tripId: string,
+  itemId: string,
+  itineraryDayId: string | null,
+  sortOrder: number,
+): Promise<TripDestination> {
+  const { data } = await apiClient.put<TripDestination>(`/trips/${tripId}/destinations/${itemId}`, {
+    itineraryDayId,
+    sortOrder,
+  });
+  return data;
+}
+
 export async function removeDestination(tripId: string, itemId: string): Promise<void> {
   await apiClient.delete(`/trips/${tripId}/destinations/${itemId}`);
 }
