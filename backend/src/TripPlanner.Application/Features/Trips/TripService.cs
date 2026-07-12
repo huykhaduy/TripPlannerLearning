@@ -51,13 +51,19 @@ public class TripService : ITripService
         var userId = _currentUser.GetRequiredUserId();
 
         // Projected straight to the DTO so SQL returns a COUNT per trip instead
-        // of loading every itinerary item just to count it.
-        return await _db.Trips
+        // of loading every itinerary item just to count it. SQLite cannot
+        // ORDER BY a DateTimeOffset column, so the CreatedAt sort happens in
+        // memory — a user's trip list is small.
+        var rows = await _db.Trips
             .AsNoTracking()
             .Where(t => t.UserId == userId) // NFR 6: only the caller's trips.
-            .OrderByDescending(t => t.CreatedAt)
-            .Select(TripMappings.ToSummaryDtoExpression)
+            .Select(TripMappings.ToSummaryRowExpression)
             .ToListAsync(cancellationToken);
+
+        return rows
+            .OrderByDescending(r => r.CreatedAt)
+            .Select(r => r.Summary)
+            .ToList();
     }
 
     public async Task<TripDetailDto> GetTripAsync(Guid tripId, CancellationToken cancellationToken = default)

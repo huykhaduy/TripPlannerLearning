@@ -1,5 +1,5 @@
-import { createContext, useContext, useMemo, useState, type ReactNode } from 'react';
-import { clearToken, storeToken } from '../api/client';
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { AUTH_LOGOUT_EVENT, clearToken, storeToken } from '../api/client';
 import * as authApi from '../api/auth';
 import type { User } from '../types';
 
@@ -31,6 +31,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(nextUser);
   }
 
+  function clearSession() {
+    clearToken();
+    localStorage.removeItem(USER_STORAGE_KEY);
+    setUser(null);
+  }
+
+  // A 401 with a token attached means the server no longer honors this
+  // session (expired/revoked) — sync isAuthenticated to that immediately,
+  // otherwise it stays true forever and traps the user off the login page.
+  useEffect(() => {
+    window.addEventListener(AUTH_LOGOUT_EVENT, clearSession);
+    return () => window.removeEventListener(AUTH_LOGOUT_EVENT, clearSession);
+  }, []);
+
   const value = useMemo<AuthContextValue>(
     () => ({
       user,
@@ -43,11 +57,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const res = await authApi.register(email, password, displayName);
         persistSession(res.accessToken, res.user);
       },
-      logout() {
-        clearToken();
-        localStorage.removeItem(USER_STORAGE_KEY);
-        setUser(null);
-      },
+      logout: clearSession,
     }),
     [user],
   );

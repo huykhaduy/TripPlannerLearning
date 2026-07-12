@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { getAttractions } from '../../api/destinations';
+import { AddToTripButton } from './AddToTripButton';
 import type { AttractionSummary, LocationSuggestion } from '../../types';
 
 function AttractionCard({ attraction }: { attraction: AttractionSummary }) {
@@ -7,20 +8,24 @@ function AttractionCard({ attraction }: { attraction: AttractionSummary }) {
   const showImage = attraction.imageUrl && !imageFailed;
 
   return (
-    <div className="attraction-card">
+    <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
       {showImage ? (
         <img
           src={attraction.imageUrl!}
           alt={attraction.name}
           onError={() => setImageFailed(true)}
+          className="h-28 w-full object-cover"
         />
       ) : (
-        <div className="attraction-placeholder">🏛️</div>
+        <div className="flex h-28 w-full items-center justify-center bg-slate-100 text-3xl">
+          🏛️
+        </div>
       )}
-      <div className="attraction-body">
+      <div className="flex flex-col gap-1 p-3 text-sm">
         <strong>{attraction.name}</strong>
-        {attraction.category && <span className="muted">{attraction.category}</span>}
+        {attraction.category && <span className="text-slate-500">{attraction.category}</span>}
         {attraction.rating != null && <span>⭐ {attraction.rating.toFixed(1)}</span>}
+        <AddToTripButton attraction={attraction} />
       </div>
     </div>
   );
@@ -52,16 +57,16 @@ export function AttractionsList({ city }: { city: LocationSuggestion }) {
     };
   }, [city]);
 
-  if (loading) return <p className="muted">Loading attractions…</p>;
-  if (error) return <p className="error">{error}</p>;
+  if (loading) return <p className="text-sm text-slate-500">Loading attractions…</p>;
+  if (error) return <p className="text-sm text-red-600">{error}</p>;
   if (attractions.length === 0) {
-    return <p className="muted">No attractions found near {city.name}.</p>;
+    return <p className="text-sm text-slate-500">No attractions found near {city.name}.</p>;
   }
 
   return (
     <section>
-      <h2>Attractions near {city.name}</h2>
-      <div className="attractions">
+      <h2 className="mb-3 text-lg font-semibold">Attractions near {city.name}</h2>
+      <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3">
         {attractions.map((attraction) => (
           <AttractionCard key={attraction.providerId} attraction={attraction} />
         ))}

@@ -2,6 +2,9 @@ import axios from 'axios';
 
 const TOKEN_STORAGE_KEY = 'tripplanner.token';
 
+/** Fired when a request 401s with a token attached — the session is stale/expired. AuthContext listens and clears itself. */
+export const AUTH_LOGOUT_EVENT = 'tripplanner:auth-logout';
+
 /**
  * A single configured axios instance used by the whole app.
  * A request interceptor attaches the JWT (when present) so authenticated
@@ -19,6 +22,19 @@ apiClient.interceptors.request.use((config) => {
   }
   return config;
 });
+
+apiClient.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    // Only a request that WAS carrying a token can mean "the session went
+    // stale" — a failed login/register also 401s but has no token to expire.
+    if (axios.isAxiosError(error) && error.response?.status === 401 && getToken()) {
+      clearToken();
+      window.dispatchEvent(new Event(AUTH_LOGOUT_EVENT));
+    }
+    return Promise.reject(error);
+  },
+);
 
 export function storeToken(token: string): void {
   localStorage.setItem(TOKEN_STORAGE_KEY, token);

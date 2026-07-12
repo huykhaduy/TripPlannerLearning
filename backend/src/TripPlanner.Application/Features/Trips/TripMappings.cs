@@ -5,9 +5,16 @@ using TripPlanner.Domain.Entities;
 namespace TripPlanner.Application.Features.Trips;
 
 /// <summary>
+/// Query row for the trip list: the summary DTO plus <c>CreatedAt</c>, which is
+/// needed only for ordering. SQLite cannot ORDER BY a DateTimeOffset in SQL,
+/// so the list query fetches this row and sorts in memory instead.
+/// </summary>
+public sealed record TripSummaryRow(DateTimeOffset CreatedAt, TripSummaryDto Summary);
+
+/// <summary>
 /// Entity → DTO mapping for the Trips feature — the single source of truth for
 /// what a trip looks like on the wire. Two forms of the same mapping:
-///   * <see cref="ToSummaryDtoExpression"/> for EF queries (translated to SQL,
+///   * <see cref="ToSummaryRowExpression"/> for EF queries (translated to SQL,
 ///     so Items.Count becomes COUNT(*) instead of loading rows);
 ///   * <see cref="ToSummaryDto"/> for entities already in memory.
 /// The extension is compiled from the expression, so the mapping is defined
@@ -15,17 +22,19 @@ namespace TripPlanner.Application.Features.Trips;
 /// </summary>
 public static class TripMappings
 {
-    public static readonly Expression<Func<Trip, TripSummaryDto>> ToSummaryDtoExpression =
-        trip => new TripSummaryDto(trip.Id, trip.Name, trip.StartDate, trip.EndDate, trip.Items.Count);
+    public static readonly Expression<Func<Trip, TripSummaryRow>> ToSummaryRowExpression =
+        trip => new TripSummaryRow(
+            trip.CreatedAt,
+            new TripSummaryDto(trip.Id, trip.Name, trip.StartDate, trip.EndDate, trip.Items.Count));
 
-    private static readonly Func<Trip, TripSummaryDto> ToSummaryDtoCompiled =
-        ToSummaryDtoExpression.Compile();
+    private static readonly Func<Trip, TripSummaryRow> ToSummaryRowCompiled =
+        ToSummaryRowExpression.Compile();
 
     /// <summary>
     /// Requires <c>trip.Items</c> to be loaded (or the trip to be freshly
     /// created); otherwise the destination count would silently read 0.
     /// </summary>
-    public static TripSummaryDto ToSummaryDto(this Trip trip) => ToSummaryDtoCompiled(trip);
+    public static TripSummaryDto ToSummaryDto(this Trip trip) => ToSummaryRowCompiled(trip).Summary;
 
     /// <summary>Requires <c>item.Destination</c> to be loaded.</summary>
     public static TripDestinationDto ToDestinationDto(this ItineraryItem item) =>
