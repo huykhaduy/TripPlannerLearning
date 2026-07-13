@@ -33,6 +33,13 @@ namespace TripPlanner.Infrastructure.ExternalApis;
 /// </summary>
 public class GeoapifyClient : IDestinationProvider
 {
+    // Deliberately broader than the spec's "tourism.sights,tourism.attraction"
+    // so the attractions list (and its category filter) covers parks, nature,
+    // entertainment and religious sites too. Catering is left out on purpose —
+    // restaurants would crowd the 20-result cap out of actual sights.
+    private const string AttractionCategories =
+        "tourism.sights,tourism.attraction,heritage,entertainment,leisure.park,natural,religion";
+
     private readonly HttpClient _httpClient;
     private readonly GeoapifySettings _settings;
 
@@ -75,7 +82,7 @@ public class GeoapifyClient : IDestinationProvider
         // is in meters. Invariant formatting so "48.85" never becomes "48,85".
         var radiusMeters = (int)(radiusKm * 1000);
         var url = FormattableString.Invariant(
-            $"v2/places?categories=tourism.sights,tourism.attraction&filter=circle:{longitude},{latitude},{radiusMeters}&limit=20&apiKey={_settings.ApiKey}");
+            $"v2/places?categories={AttractionCategories}&filter=circle:{longitude},{latitude},{radiusMeters}&limit=20&apiKey={_settings.ApiKey}");
 
         using var response = await _httpClient.GetAsync(url, cancellationToken);
         response.EnsureSuccessStatusCode();
@@ -94,7 +101,7 @@ public class GeoapifyClient : IDestinationProvider
             .Select(p => new DestinationSummaryDto(
                 ProviderId: p!.PlaceId!,
                 Name: p.Name ?? p.AddressLine1 ?? "Unnamed place",
-                Category: p.Categories?.FirstOrDefault(),
+                Category: MostSpecificCategory(p.Categories),
                 ImageUrl: p.WikiAndMedia?.Image,
                 Rating: null)) // Geoapify has no ratings; the UI shows a placeholder
             .ToList();
@@ -128,7 +135,7 @@ public class GeoapifyClient : IDestinationProvider
             // key, and repeat adds must hit the same row.
             ProviderId: providerId,
             Name: place.Name ?? place.AddressLine1 ?? "Unnamed place",
-            Category: place.Categories?.FirstOrDefault(),
+            Category: MostSpecificCategory(place.Categories),
             Description: place.Description,
             ImageUrl: place.WikiAndMedia?.Image,
             Latitude: place.Lat,
@@ -137,6 +144,17 @@ public class GeoapifyClient : IDestinationProvider
             Website: place.Website,
             OpeningHours: place.OpeningHours);
     }
+
+    /// <summary>
+    /// Geoapify tags each place with a hierarchy like ["tourism",
+    /// "tourism.sights", "tourism.sights.castle"] — the deepest path is the
+    /// most descriptive, and its last segment ("castle") is what a user wants
+    /// to read on a card or pick in the category filter.
+    /// </summary>
+    private static string? MostSpecificCategory(List<string>? categories) =>
+        categories is not { Count: > 0 }
+            ? null
+            : categories.MaxBy(c => c.Count(ch => ch == '.'))!.Split('.')[^1];
 
     // ------------------------------------------------------------------
     // Private wire DTOs — the exact JSON shapes Geoapify returns (GeoJSON
