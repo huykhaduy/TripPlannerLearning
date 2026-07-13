@@ -98,9 +98,10 @@ public class GeoapifyClient : IDestinationProvider
         return payload.Features
             .Select(f => f.Properties)
             .Where(p => p?.PlaceId is not null) // a POI we can't re-fetch by id is useless downstream
+            .Where(p => p!.Name is not null) // unnamed places render as bare street addresses — skip them
             .Select(p => new DestinationSummaryDto(
                 ProviderId: p!.PlaceId!,
-                Name: p.Name ?? p.AddressLine1 ?? "Unnamed place",
+                Name: p.Name!,
                 Category: MostSpecificCategory(p.Categories),
                 ImageUrl: p.WikiAndMedia?.Image,
                 Rating: null)) // Geoapify has no ratings; the UI shows a placeholder
