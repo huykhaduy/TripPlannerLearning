@@ -21,6 +21,10 @@ public static class DependencyInjection
         // Registers every AbstractValidator<T> in this assembly as IValidator<T>.
         services.AddValidatorsFromAssembly(typeof(DependencyInjection).Assembly);
 
+        // Wall clock as a dependency so cache-freshness logic is testable
+        // (tests substitute a fake TimeProvider and fast-forward time).
+        services.AddSingleton(TimeProvider.System);
+
         return services;
     }
 }

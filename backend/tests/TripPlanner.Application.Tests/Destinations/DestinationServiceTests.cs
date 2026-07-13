@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using Moq;
 using TripPlanner.Application.Common.Exceptions;
 using TripPlanner.Application.Common.Interfaces;
@@ -49,8 +50,20 @@ public class DestinationServiceTests
         return CreateSut(CreateDb(), provider);
     }
 
-    private static DestinationService CreateSut(ApplicationDbContext db, Mock<IDestinationProvider> provider) =>
+    /// <summary>
+    /// Controllable wall clock: caching TTLs are checked against this, so a
+    /// test can "wait 25 hours" by moving <see cref="Now"/> forward.
+    /// </summary>
+    private sealed class FakeClock : TimeProvider
+    {
+        public DateTimeOffset Now { get; set; } = new(2026, 7, 12, 12, 0, 0, TimeSpan.Zero);
+        public override DateTimeOffset GetUtcNow() => Now;
+    }
+
+    private static DestinationService CreateSut(
+        ApplicationDbContext db, Mock<IDestinationProvider> provider, FakeClock? clock = null) =>
         new(db, provider.Object,
+            new MemoryCache(new MemoryCacheOptions()), clock ?? new FakeClock(),
             new SearchLocationsRequestValidator(), new GetAttractionsRequestValidator(),
             new GetDestinationDetailsRequestValidator());
 
@@ -288,5 +301,123 @@ public class DestinationServiceTests
         var sut = CreateSut(CreateDb(), ProviderReturning(null));
 
         await Assert.ThrowsAsync<ValidationException>(() => sut.GetDetailsAsync(providerId));
+    }
+
+    // ------------------------------------------------------------------
+    // Caching (NFR1/NFR2) + stale-better-than-down (spec §11.2)
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public async Task SearchLocationsAsync_RepeatedQuery_CallsProviderOnce()
+    {
+        var provider = new Mock<IDestinationProvider>();
+        provider
+            .Setup(p => p.SearchLocationsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([Suggestion("Paris", "France")]);
+        var sut = CreateSut(CreateDb(), provider);
+
+        await sut.SearchLocationsAsync("paris");
+        // Different casing and padding, same cache key after trim + lower.
+        var second = await sut.SearchLocationsAsync("  PARIS ");
+
+        Assert.Equal("Paris", Assert.Single(second).Name);
+        provider.Verify(
+            p => p.SearchLocationsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task SearchLocationsAsync_DifferentQueries_CallProviderEachTime()
+    {
+        var provider = new Mock<IDestinationProvider>();
+        provider
+            .Setup(p => p.SearchLocationsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([]);
+        var sut = CreateSut(CreateDb(), provider);
+
+        await sut.SearchLocationsAsync("paris");
+        await sut.SearchLocationsAsync("hanoi");
+
+        provider.Verify(
+            p => p.SearchLocationsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Exactly(2));
+    }
+
+    [Fact]
+    public async Task GetAttractionsAsync_SameCoordinates_CallsProviderOnce()
+    {
+        var provider = new Mock<IDestinationProvider>();
+        provider
+            .Setup(p => p.GetAttractionsAsync(
+                It.IsAny<double>(), It.IsAny<double>(), It.IsAny<double>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([Attraction("Golden Bridge")]);
+        var sut = CreateSut(CreateDb(), provider);
+
+        await sut.GetAttractionsAsync(16.0545, 108.2022, 20);
+        var second = await sut.GetAttractionsAsync(16.0545, 108.2022, 20);
+
+        Assert.Equal("Golden Bridge", Assert.Single(second).Name);
+        provider.Verify(
+            p => p.GetAttractionsAsync(
+                It.IsAny<double>(), It.IsAny<double>(), It.IsAny<double>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task GetDetailsAsync_RepeatedProviderId_CallsProviderOnce()
+    {
+        var details = new DestinationDetailsDto(
+            "geo-1", "Golden Bridge", null, null, null, null, null, null, null, null);
+        var provider = ProviderReturning(details);
+        var sut = CreateSut(CreateDb(), provider);
+
+        await sut.GetDetailsAsync("geo-1");
+        var second = await sut.GetDetailsAsync("geo-1");
+
+        Assert.Equal("Golden Bridge", second.Name);
+        provider.Verify(
+            p => p.GetDestinationDetailsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task SearchLocationsAsync_ExpiredEntryAndProviderDown_ServesStaleResult()
+    {
+        var clock = new FakeClock();
+        var provider = new Mock<IDestinationProvider>();
+        provider
+            .SetupSequence(p => p.SearchLocationsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([Suggestion("Paris", "France")])
+            .ThrowsAsync(new HttpRequestException("simulated outage"));
+        var sut = CreateSut(CreateDb(), provider, clock);
+
+        await sut.SearchLocationsAsync("paris");
+        clock.Now += TimeSpan.FromHours(25); // past the 24 h TTL -> refetch -> provider is down
+
+        var result = await sut.SearchLocationsAsync("paris");
+
+        Assert.Equal("Paris", Assert.Single(result).Name); // stale entry served, no 500
+    }
+
+    [Fact]
+    public async Task GetDetailsAsync_ExpiredEntryAndProviderDown_ServesStaleResult()
+    {
+        var clock = new FakeClock();
+        var details = new DestinationDetailsDto(
+            "geo-1", "Golden Bridge", null, null, null, null, null, null, null, null);
+        var provider = new Mock<IDestinationProvider>();
+        provider
+            .SetupSequence(p => p.GetDestinationDetailsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(details)
+            .ThrowsAsync(new HttpRequestException("simulated outage"));
+        // Empty DB: if the stale entry were not served, this would be a 404.
+        var sut = CreateSut(CreateDb(), provider, clock);
+
+        await sut.GetDetailsAsync("geo-1");
+        clock.Now += TimeSpan.FromHours(25);
+
+        var result = await sut.GetDetailsAsync("geo-1");
+
+        Assert.Equal("Golden Bridge", result.Name);
     }
 }

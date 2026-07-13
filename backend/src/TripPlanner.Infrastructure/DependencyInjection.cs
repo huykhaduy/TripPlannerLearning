@@ -25,6 +25,9 @@ public static class DependencyInjection
         services.AddScoped<IPasswordHasher, BCryptPasswordHasher>();
         services.AddScoped<IJwtTokenGenerator, JwtTokenGenerator>();
 
+        // In-memory cache for browse-path provider results (spec §11.2 NFR1/NFR2).
+        services.AddMemoryCache();
+
         // External travel data provider (typed HttpClient + bound settings).
         services.Configure<GeoapifySettings>(configuration.GetSection(GeoapifySettings.SectionName));
         services.AddHttpClient<IDestinationProvider, GeoapifyClient>(client =>
