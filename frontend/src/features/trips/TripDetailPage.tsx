@@ -274,6 +274,8 @@ export function TripDetailPage() {
     );
   }
 
+  const hasDays = trip.days.length > 0;
+
   return (
     <div className="flex flex-col gap-8">
       <div>
@@ -320,43 +322,47 @@ export function TripDetailPage() {
       {removeError && <p className="text-sm text-red-600">{removeError}</p>}
       {moveError && <p className="text-sm text-red-600">{moveError}</p>}
 
-      {trip.days.length === 0 ? (
-        <p className="text-sm text-slate-500">Set the trip dates to generate a day-by-day itinerary.</p>
-      ) : (
-        <div className="flex flex-col gap-6">
-          {trip.days.map((day) => (
-            <section key={day.id}>
-              <h2 className="text-lg font-semibold text-slate-900">
-                Day {day.dayNumber} <span className="font-normal text-slate-500">{day.date}</span>
-              </h2>
-              <DestinationList
-                dayId={day.id}
-                destinations={day.destinations}
-                emptyHint="Nothing planned yet — drag a destination here."
-                onRemove={handleRemove}
-                removingItemId={removingItemId}
-                onDragStart={setDragItemId}
-                onDragEnd={() => setDragItemId(null)}
-                onDrop={handleDrop}
-              />
-            </section>
-          ))}
+      <div className={hasDays ? 'flex flex-col gap-8 lg:flex-row lg:items-start' : 'flex flex-col gap-8'}>
+        <div className={hasDays ? 'flex flex-1 flex-col gap-6' : 'flex flex-col gap-6'}>
+          {hasDays ? (
+            trip.days.map((day) => (
+              <section key={day.id}>
+                <h2 className="text-lg font-semibold text-slate-900">
+                  Day {day.dayNumber} <span className="font-normal text-slate-500">{day.date}</span>
+                </h2>
+                <DestinationList
+                  dayId={day.id}
+                  destinations={day.destinations}
+                  emptyHint="Nothing planned yet — drag a destination here."
+                  onRemove={handleRemove}
+                  removingItemId={removingItemId}
+                  onDragStart={setDragItemId}
+                  onDragEnd={() => setDragItemId(null)}
+                  onDrop={handleDrop}
+                />
+              </section>
+            ))
+          ) : (
+            <p className="text-sm text-slate-500">Set the trip dates to generate a day-by-day itinerary.</p>
+          )}
         </div>
-      )}
 
-      <section>
-        <h2 className="text-lg font-semibold text-slate-900">Saved Places</h2>
-        <DestinationList
-          dayId={null}
-          destinations={trip.savedPlaces}
-          emptyHint="No saved places — add destinations from the Discover page."
-          onRemove={handleRemove}
-          removingItemId={removingItemId}
-          onDragStart={setDragItemId}
-          onDragEnd={() => setDragItemId(null)}
-          onDrop={handleDrop}
-        />
-      </section>
+        <div className={hasDays ? 'lg:sticky lg:top-8 lg:w-80 lg:shrink-0' : ''}>
+          <section>
+            <h2 className="text-lg font-semibold text-slate-900">Saved Places</h2>
+            <DestinationList
+              dayId={null}
+              destinations={trip.savedPlaces}
+              emptyHint="No saved places — add destinations from the Discover page."
+              onRemove={handleRemove}
+              removingItemId={removingItemId}
+              onDragStart={setDragItemId}
+              onDragEnd={() => setDragItemId(null)}
+              onDrop={handleDrop}
+            />
+          </section>
+        </div>
+      </div>
     </div>
   );
 }
