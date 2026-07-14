@@ -3,6 +3,8 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { useAuth } from '../../auth/AuthContext';
 import { getMyTrips, getTrip, addDestination } from '../../api/trips';
+import { Button } from '../../components/Button';
+import { Field, fieldControlClass } from '../../components/Field';
 import type { AttractionSummary, ItineraryDay, TripSummary } from '../../types';
 
 /**
@@ -45,13 +47,9 @@ export function AddToTripButton({ attraction }: { attraction: AttractionSummary 
 
   return (
     <>
-      <button
-        type="button"
-        onClick={handleClick}
-        className="mt-1 self-start rounded-lg border border-blue-200 px-3 py-1.5 text-sm text-blue-600 hover:bg-blue-50"
-      >
+      <Button type="button" variant="outline" size="sm" onClick={handleClick} className="w-full">
         {justAdded ? 'Added ✓' : 'Add to trip'}
-      </button>
+      </Button>
       {open && (
         <AddToTripDialog
           attraction={attraction}
@@ -134,17 +132,14 @@ function AddToTripDialog({
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4"
-      onClick={onClose}
-    >
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4" onClick={onClose}>
       <div
-        className="w-full max-w-sm rounded-xl border border-slate-200 bg-white p-6 shadow-lg"
+        className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-6 shadow-lg"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-label={`Add ${attraction.name} to a trip`}
       >
-        <h3 className="text-lg font-semibold">Add “{attraction.name}”</h3>
+        <h3 className="text-lg font-semibold text-slate-900">Add “{attraction.name}”</h3>
 
         {trips === null && !error && <p className="mt-3 text-sm text-slate-500">Loading your trips…</p>}
 
@@ -155,14 +150,9 @@ function AddToTripDialog({
         )}
 
         {trips !== null && trips.length > 0 && (
-          <div className="mt-3 flex flex-col gap-3">
-            <label className="flex flex-col gap-1.5 text-sm text-slate-500">
-              Trip
-              <select
-                value={tripId}
-                onChange={(e) => setTripId(e.target.value)}
-                className="rounded-lg border border-slate-300 px-3 py-2 text-base text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-              >
+          <div className="mt-4 flex flex-col gap-3">
+            <Field label="Trip">
+              <select value={tripId} onChange={(e) => setTripId(e.target.value)} className={fieldControlClass}>
                 <option value="">Choose a trip…</option>
                 {trips.map((trip) => (
                   <option key={trip.id} value={trip.id}>
@@ -170,16 +160,11 @@ function AddToTripDialog({
                   </option>
                 ))}
               </select>
-            </label>
+            </Field>
 
             {tripId && (
-              <label className="flex flex-col gap-1.5 text-sm text-slate-500">
-                Day
-                <select
-                  value={dayId}
-                  onChange={(e) => setDayId(e.target.value)}
-                  className="rounded-lg border border-slate-300 px-3 py-2 text-base text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-                >
+              <Field label="Day">
+                <select value={dayId} onChange={(e) => setDayId(e.target.value)} className={fieldControlClass}>
                   <option value="">Saved Places (no day yet)</option>
                   {(days ?? []).map((day) => (
                     <option key={day.id} value={day.id}>
@@ -187,29 +172,20 @@ function AddToTripDialog({
                     </option>
                   ))}
                 </select>
-              </label>
+              </Field>
             )}
           </div>
         )}
 
         {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
 
-        <div className="mt-4 flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50"
-          >
+        <div className="mt-5 flex justify-end gap-2">
+          <Button type="button" variant="secondary" size="sm" onClick={onClose}>
             Cancel
-          </button>
-          <button
-            type="button"
-            onClick={handleAdd}
-            disabled={!tripId || adding}
-            className="rounded-lg bg-blue-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-          >
+          </Button>
+          <Button type="button" size="sm" onClick={handleAdd} disabled={!tripId || adding}>
             {adding ? 'Adding…' : 'Add'}
-          </button>
+          </Button>
         </div>
       </div>
     </div>

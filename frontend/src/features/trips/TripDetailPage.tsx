@@ -2,7 +2,26 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import axios from 'axios';
 import { getTrip, removeDestination, updateItineraryItem, updateTrip } from '../../api/trips';
+import { Card } from '../../components/Card';
+import { Field, fieldControlClass } from '../../components/Field';
+import { Button } from '../../components/Button';
 import type { TripDestination, TripDetail } from '../../types';
+
+/** Small thumbnail with the same missing/broken-image fallback as the attraction cards. */
+function DestinationThumbnail({ imageUrl, name }: { imageUrl: string | null; name: string }) {
+  const [failed, setFailed] = useState(false);
+  const showImage = imageUrl && !failed;
+  return showImage ? (
+    <img src={imageUrl} alt={name} onError={() => setFailed(true)} className="h-10 w-10 rounded-lg object-cover" />
+  ) : (
+    <div
+      className="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-100 text-base"
+      aria-hidden="true"
+    >
+      🏛️
+    </div>
+  );
+}
 
 /**
  * F3/US4-US6 — one drop-enabled bucket (a day, or Saved Places when dayId is
@@ -34,11 +53,11 @@ function DestinationList({
       onDrop={() => onDrop(dayId, destinations.length)}
     >
       {destinations.length === 0 ? (
-        <p className="mt-2 rounded-lg border border-dashed border-slate-300 px-3 py-2 text-sm text-slate-500">
+        <p className="mt-3 rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">
           {emptyHint}
         </p>
       ) : (
-        <ul className="mt-2 flex flex-col gap-2">
+        <ul className="mt-3 flex flex-col gap-2">
           {destinations.map((destination, index) => (
             <li
               key={destination.itemId}
@@ -50,17 +69,22 @@ function DestinationList({
                 e.stopPropagation(); // this drop is ours — don't also append via the list handler
                 onDrop(dayId, index);
               }}
-              className="flex cursor-grab items-center justify-between gap-2 rounded-lg border border-slate-200 px-3 py-2 active:cursor-grabbing"
+              className="flex cursor-grab items-center gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 active:cursor-grabbing"
             >
-              <span>{destination.name}</span>
-              <button
+              <span className="select-none text-slate-400" aria-hidden="true">
+                ⠿
+              </span>
+              <DestinationThumbnail imageUrl={destination.imageUrl} name={destination.name} />
+              <span className="flex-1 text-slate-900">{destination.name}</span>
+              <Button
                 type="button"
+                variant="danger"
+                size="sm"
                 onClick={() => onRemove(destination.itemId)}
                 disabled={removingItemId === destination.itemId}
-                className="rounded-lg border border-red-200 px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {removingItemId === destination.itemId ? 'Removing…' : 'Remove'}
-              </button>
+              </Button>
             </li>
           ))}
         </ul>
@@ -233,99 +257,95 @@ export function TripDetailPage() {
 
   if (loadError) {
     return (
-      <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
+      <Card className="mx-auto max-w-2xl">
         <p className="text-sm text-red-600">{loadError}</p>
-        <Link to="/trips" className="mt-2 inline-block text-sm text-blue-600 hover:underline">
+        <Link to="/trips" className="mt-2 inline-block text-sm text-brand-600 hover:underline">
           ← Back to my trips
         </Link>
-      </div>
+      </Card>
     );
   }
 
   if (!trip) {
     return (
-      <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
+      <Card className="mx-auto max-w-2xl">
         <p className="text-sm text-slate-500">Loading trip…</p>
-      </div>
+      </Card>
     );
   }
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
-      <Link to="/trips" className="text-sm text-blue-600 hover:underline">
-        ← Back to my trips
-      </Link>
-      <h1 className="mt-2 text-2xl font-bold">{trip.name}</h1>
+    <div className="flex flex-col gap-8">
+      <div>
+        <Link to="/trips" className="text-sm text-brand-600 hover:underline">
+          ← Back to my trips
+        </Link>
+        <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-900">{trip.name}</h1>
+      </div>
 
-      <form onSubmit={handleSave} className="mt-4 flex flex-col gap-4">
-        <label className="flex flex-col gap-1.5 text-sm text-slate-500">
-          Name
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            required
-            className="rounded-lg border border-slate-300 px-3 py-2 text-base text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-          />
-        </label>
-        <div className="flex gap-4">
-          <label className="flex flex-1 flex-col gap-1.5 text-sm text-slate-500">
-            Start date
-            <input
-              type="date"
-              value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
-              className="rounded-lg border border-slate-300 px-3 py-2 text-base text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-            />
-          </label>
-          <label className="flex flex-1 flex-col gap-1.5 text-sm text-slate-500">
-            End date
-            <input
-              type="date"
-              value={endDate}
-              onChange={(e) => setEndDate(e.target.value)}
-              className="rounded-lg border border-slate-300 px-3 py-2 text-base text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-            />
-          </label>
-        </div>
-        {saveError && <p className="text-sm text-red-600">{saveError}</p>}
-        <button
-          type="submit"
-          disabled={saving || name.trim() === ''}
-          className="self-start rounded-lg bg-blue-600 px-4 py-2 font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {saving ? 'Saving…' : 'Save changes'}
-        </button>
-      </form>
+      <Card>
+        <form onSubmit={handleSave} className="flex flex-col gap-4">
+          <Field label="Name">
+            <input value={name} onChange={(e) => setName(e.target.value)} required className={fieldControlClass} />
+          </Field>
+          <div className="flex gap-4">
+            <div className="flex-1">
+              <Field label="Start date">
+                <input
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                  className={fieldControlClass}
+                />
+              </Field>
+            </div>
+            <div className="flex-1">
+              <Field label="End date">
+                <input
+                  type="date"
+                  value={endDate}
+                  onChange={(e) => setEndDate(e.target.value)}
+                  className={fieldControlClass}
+                />
+              </Field>
+            </div>
+          </div>
+          {saveError && <p className="text-sm text-red-600">{saveError}</p>}
+          <Button type="submit" disabled={saving || name.trim() === ''} className="self-start">
+            {saving ? 'Saving…' : 'Save changes'}
+          </Button>
+        </form>
+      </Card>
 
-      {removeError && <p className="mt-4 text-sm text-red-600">{removeError}</p>}
-      {moveError && <p className="mt-4 text-sm text-red-600">{moveError}</p>}
+      {removeError && <p className="text-sm text-red-600">{removeError}</p>}
+      {moveError && <p className="text-sm text-red-600">{moveError}</p>}
 
       {trip.days.length === 0 ? (
-        <p className="mt-6 text-sm text-slate-500">
-          Set the trip dates to generate a day-by-day itinerary.
-        </p>
+        <p className="text-sm text-slate-500">Set the trip dates to generate a day-by-day itinerary.</p>
       ) : (
-        trip.days.map((day) => (
-          <section key={day.id} className="mt-6 border-t border-slate-200 pt-4">
-            <h2 className="text-lg font-semibold">
-              Day {day.dayNumber} <span className="font-normal text-slate-500">{day.date}</span>
-            </h2>
-            <DestinationList
-              dayId={day.id}
-              destinations={day.destinations}
-              emptyHint="Nothing planned yet — drag a destination here."
-              onRemove={handleRemove}
-              removingItemId={removingItemId}
-              onDragStart={setDragItemId}
-              onDragEnd={() => setDragItemId(null)}
-              onDrop={handleDrop}
-            />
-          </section>
-        ))
+        <div className="flex flex-col gap-6">
+          {trip.days.map((day) => (
+            <section key={day.id}>
+              <h2 className="text-lg font-semibold text-slate-900">
+                Day {day.dayNumber} <span className="font-normal text-slate-500">{day.date}</span>
+              </h2>
+              <DestinationList
+                dayId={day.id}
+                destinations={day.destinations}
+                emptyHint="Nothing planned yet — drag a destination here."
+                onRemove={handleRemove}
+                removingItemId={removingItemId}
+                onDragStart={setDragItemId}
+                onDragEnd={() => setDragItemId(null)}
+                onDrop={handleDrop}
+              />
+            </section>
+          ))}
+        </div>
       )}
 
-      <section className="mt-6 border-t border-slate-200 pt-4">
-        <h2 className="text-lg font-semibold">Saved Places</h2>
+      <section>
+        <h2 className="text-lg font-semibold text-slate-900">Saved Places</h2>
         <DestinationList
           dayId={null}
           destinations={trip.savedPlaces}

@@ -2,6 +2,9 @@ import { useState, type FormEvent } from 'react';
 import { Link, Navigate, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { useAuth } from '../../auth/AuthContext';
+import { Card } from '../../components/Card';
+import { Field, fieldControlClass } from '../../components/Field';
+import { Button } from '../../components/Button';
 
 /** Feature 4 / US1 — sign up with email and password. */
 export function RegisterPage() {
@@ -37,53 +40,48 @@ export function RegisterPage() {
   }
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
-      <h1 className="mb-4 text-2xl font-bold">Create account</h1>
-      <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-        <label className="flex flex-col gap-1.5 text-sm text-slate-500">
-          Display name (optional)
-          <input
-            value={displayName}
-            onChange={(e) => setDisplayName(e.target.value)}
-            className="rounded-lg border border-slate-300 px-3 py-2 text-base text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-          />
-        </label>
-        <label className="flex flex-col gap-1.5 text-sm text-slate-500">
-          Email
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-            className="rounded-lg border border-slate-300 px-3 py-2 text-base text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-          />
-        </label>
-        <label className="flex flex-col gap-1.5 text-sm text-slate-500">
-          Password (min 8 characters)
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            minLength={8}
-            required
-            className="rounded-lg border border-slate-300 px-3 py-2 text-base text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-          />
-        </label>
-        {error && <p className="text-sm text-red-600">{error}</p>}
-        <button
-          type="submit"
-          disabled={submitting}
-          className="rounded-lg bg-blue-600 px-4 py-2 font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {submitting ? 'Creating…' : 'Sign up'}
-        </button>
-      </form>
-      <p className="mt-4 text-sm text-slate-500">
-        Already have an account?{' '}
-        <Link to="/login" className="text-blue-600 hover:underline">
-          Log in
-        </Link>
-      </p>
+    <div className="flex min-h-[65vh] items-center justify-center">
+      <Card className="w-full max-w-sm">
+        <h1 className="text-3xl font-semibold tracking-tight text-slate-900">Create account</h1>
+        <form onSubmit={handleSubmit} className="mt-6 flex flex-col gap-4">
+          <Field label="Display name (optional)">
+            <input
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              className={fieldControlClass}
+            />
+          </Field>
+          <Field label="Email">
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+              className={fieldControlClass}
+            />
+          </Field>
+          <Field label="Password (min 8 characters)">
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              minLength={8}
+              required
+              className={fieldControlClass}
+            />
+          </Field>
+          {error && <p className="text-sm text-red-600">{error}</p>}
+          <Button type="submit" disabled={submitting}>
+            {submitting ? 'Creating…' : 'Sign up'}
+          </Button>
+        </form>
+        <p className="mt-4 text-sm text-slate-500">
+          Already have an account?{' '}
+          <Link to="/login" className="text-brand-600 hover:underline">
+            Log in
+          </Link>
+        </p>
+      </Card>
     </div>
   );
 }

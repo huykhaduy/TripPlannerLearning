@@ -15,23 +15,29 @@ export function SearchPage() {
   const [selectedCity, setSelectedCity] = useState<LocationSuggestion | null>(null);
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
-      <h1 className="mb-2 text-2xl font-bold">Discover destinations</h1>
-      <p className="text-sm text-slate-500">Search for a city to see its recommended attractions.</p>
-      <CitySearchInput onSelect={setSelectedCity} />
+    <div className="flex flex-col gap-8">
+      <div className="rounded-3xl bg-brand-600 px-6 py-14 text-center shadow-sm sm:py-20">
+        <h1 className="text-4xl font-semibold tracking-tight text-white sm:text-5xl">Where to next?</h1>
+        <p className="mt-3 text-brand-50">Search a city to see its recommended attractions.</p>
+        <div className="mx-auto mt-6 max-w-xl">
+          <CitySearchInput onSelect={setSelectedCity} />
+        </div>
+      </div>
+
       {selectedCity && <AttractionsList city={selectedCity} />}
-      <p className="mt-4 text-sm text-slate-500">
+
+      <p className="text-center text-sm text-slate-500">
         {isAuthenticated ? (
           <>
             Ready to plan?{' '}
-            <Link to="/trips" className="text-blue-600 hover:underline">
+            <Link to="/trips" className="text-brand-600 hover:underline">
               Go to My trips
             </Link>
             .
           </>
         ) : (
           <>
-            <Link to="/login" className="text-blue-600 hover:underline">
+            <Link to="/login" className="text-brand-600 hover:underline">
               Log in
             </Link>{' '}
             to start planning a trip.
