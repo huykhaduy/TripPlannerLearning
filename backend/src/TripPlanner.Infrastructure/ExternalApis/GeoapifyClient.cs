@@ -1,5 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Options;
 using TripPlanner.Application.Common.Interfaces;
@@ -40,6 +42,17 @@ public class GeoapifyClient : IDestinationProvider
     private const string AttractionCategories =
         "tourism.sights,tourism.attraction,heritage,entertainment,leisure.park,natural,religion";
 
+    // Geoapify's place data is sourced from OpenStreetMap tags that are
+    // nominally free-text but occasionally look numeric (e.g. a memorial
+    // stone named "1918") — Geoapify then serializes that value as a bare
+    // JSON number instead of a string, which crashes the default string
+    // converter for the *entire* response. Registering LenientStringConverter
+    // here makes every string property in the wire DTOs below tolerate that.
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        Converters = { new LenientStringConverter() }
+    };
+
     private readonly HttpClient _httpClient;
     private readonly GeoapifySettings _settings;
 
@@ -59,7 +72,7 @@ public class GeoapifyClient : IDestinationProvider
         using var response = await _httpClient.GetAsync(url, cancellationToken);
         response.EnsureSuccessStatusCode();
 
-        var payload = await response.Content.ReadFromJsonAsync<GeocodeResponse>(cancellationToken);
+        var payload = await response.Content.ReadFromJsonAsync<GeocodeResponse>(JsonOptions, cancellationToken);
         if (payload?.Features is null)
         {
             return [];
@@ -89,7 +102,7 @@ public class GeoapifyClient : IDestinationProvider
 
         // Same GeoJSON FeatureCollection shape as place-details, so the wire
         // records are shared.
-        var payload = await response.Content.ReadFromJsonAsync<PlacesResponse>(cancellationToken);
+        var payload = await response.Content.ReadFromJsonAsync<PlacesResponse>(JsonOptions, cancellationToken);
         if (payload?.Features is null)
         {
             return [];
@@ -123,7 +136,7 @@ public class GeoapifyClient : IDestinationProvider
 
         response.EnsureSuccessStatusCode(); // anything else (401, 5xx) is a real fault
 
-        var payload = await response.Content.ReadFromJsonAsync<PlacesResponse>(cancellationToken);
+        var payload = await response.Content.ReadFromJsonAsync<PlacesResponse>(JsonOptions, cancellationToken);
         var place = payload?.Features?.FirstOrDefault()?.Properties;
         if (place is null)
         {
@@ -200,4 +213,20 @@ public class GeoapifyClient : IDestinationProvider
 
     private sealed record WikiAndMedia(
         [property: JsonPropertyName("image")] string? Image);
+
+    private sealed class LenientStringConverter : JsonConverter<string?>
+    {
+        public override string? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) =>
+            reader.TokenType switch
+            {
+                JsonTokenType.Null => null,
+                JsonTokenType.String => reader.GetString(),
+                JsonTokenType.Number or JsonTokenType.True or JsonTokenType.False =>
+                    Encoding.UTF8.GetString(reader.ValueSpan),
+                _ => throw new JsonException($"Cannot convert token type {reader.TokenType} to string.")
+            };
+
+        public override void Write(Utf8JsonWriter writer, string? value, JsonSerializerOptions options) =>
+            writer.WriteStringValue(value);
+    }
 }

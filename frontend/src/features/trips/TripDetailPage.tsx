@@ -232,7 +232,16 @@ export function TripDetailPage() {
   }
 
   async function handleRemove(itemId: string) {
-    if (!tripId) return;
+    if (!tripId || !trip) return;
+
+    const destination = [...trip.savedPlaces, ...trip.days.flatMap((d) => d.destinations)].find(
+      (d) => d.itemId === itemId,
+    );
+    const confirmed = window.confirm(
+      `Remove ${destination?.name ?? 'this destination'} from the trip?`,
+    );
+    if (!confirmed) return;
+
     setRemoveError(null);
     setRemovingItemId(itemId);
     try {
