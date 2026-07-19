@@ -1,11 +1,13 @@
-# Voyager Redesign (Stitch mockups) — Design
+# Trip Planner Redesign (Stitch mockups) — Design
 
 **Date:** 2026-07-19
 **Scope:** Visual/UX redesign of all 4 authenticated + public trip-planning
 pages (Explore/Search, Destination Details, My Trips, Trip Itinerary) plus the
-app shell nav, to match the "Voyager" design system produced by Stitch
-(`~/Downloads/stitch_website_development_implementation/`). No backend
-changes. No new frontend dependencies.
+app shell nav, to match the color/type/layout system produced by Stitch
+(`~/Downloads/stitch_website_development_implementation/`). The app's own
+name/branding is unchanged — **"Trip Planner"** with a plane (✈️) logo, not
+the mockups' "Voyager" wordmark; only the visual design system is adopted, not
+the product name. No backend changes. No new frontend dependencies.
 
 This **supersedes** the palette/layout decisions in
 [2026-07-14-visual-redesign-design.md](2026-07-14-visual-redesign-design.md)
@@ -36,8 +38,8 @@ dropped, with the reason.
 
 ## Design tokens (`src/styles.css`)
 
-Replace the current indigo `brand-*` ramp with the Voyager tokens. Keep the
-`brand-*` naming (consumers don't need to change) but repoint the values:
+Replace the current indigo `brand-*` ramp with the Stitch color tokens. Keep
+the `brand-*` naming (consumers don't need to change) but repoint the values:
 
 ```css
 @theme {
@@ -94,9 +96,11 @@ same mechanism the mockups use — no new npm dependency.
 
 ## App shell (`App.tsx`)
 
-- Nav bar restyled to the mockups' `Voyager` wordmark + underlined active tab
-  (blue), sticky top, `max-w-[1280px]` centered content (replaces current
-  `max-w-6xl` — close enough, align to the mockup's exact breakpoint).
+- Nav bar restyled with the existing "✈️ Trip Planner" wordmark (unchanged
+  name/logo — only the mockups' *layout*, not their "Voyager" branding, is
+  adopted) + underlined active tab (blue), sticky top, `max-w-[1280px]`
+  centered content (replaces current `max-w-6xl` — close enough, align to the
+  mockup's exact breakpoint).
 - Right side keeps the existing pattern: initials `Avatar` + name/email +
   "Log out" pill when authenticated; "Log in"/"Sign up" when not. **No** header
   cloud-sync indicator — that's scoped to the trip detail page only (see
