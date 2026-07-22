@@ -16,7 +16,7 @@ public record AddDestinationRequest(string ProviderId, Guid? ItineraryDayId);
 public record UpdateItineraryItemRequest(Guid? ItineraryDayId, int SortOrder);
 
 /// <summary>Summary row for the user's trip list (F3/US10).</summary>
-public record TripSummaryDto(Guid Id, string Name, DateOnly? StartDate, DateOnly? EndDate, int DestinationCount);
+public record TripSummaryDto(Guid Id, string Name, DateOnly? StartDate, DateOnly? EndDate, int DestinationCount, string? CoverImageUrl);
 
 /// <summary>A destination as it appears inside a trip.</summary>
 public record TripDestinationDto(Guid ItemId, string ProviderId, string Name, string? ImageUrl, int SortOrder);

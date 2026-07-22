@@ -18,12 +18,25 @@ public class TripServiceTests
             .UseInMemoryDatabase(databaseName: Guid.NewGuid().ToString())
             .Options);
 
-    private static TripService CreateSut(ApplicationDbContext db, Guid? userId, IDestinationProvider? provider = null)
+    /// <summary>An image search provider that never finds anything, by default — tests
+    /// that care about ImageUrl pass their own mock instead.</summary>
+    private static Mock<IImageSearchProvider> NoOpImageSearch()
+    {
+        var imageSearch = new Mock<IImageSearchProvider>();
+        imageSearch
+            .Setup(p => p.SearchImageAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string?)null);
+        return imageSearch;
+    }
+
+    private static TripService CreateSut(
+        ApplicationDbContext db, Guid? userId, IDestinationProvider? provider = null, Mock<IImageSearchProvider>? imageSearch = null)
     {
         var currentUser = new Mock<ICurrentUserService>();
         currentUser.Setup(c => c.UserId).Returns(userId);
 
         return new TripService(db, currentUser.Object, provider ?? Mock.Of<IDestinationProvider>(),
+            (imageSearch ?? NoOpImageSearch()).Object,
             new CreateTripRequestValidator(), new UpdateTripRequestValidator(),
             new AddDestinationRequestValidator(), new UpdateItineraryItemRequestValidator());
     }

@@ -25,7 +25,16 @@ public static class TripMappings
     public static readonly Expression<Func<Trip, TripSummaryRow>> ToSummaryRowExpression =
         trip => new TripSummaryRow(
             trip.CreatedAt,
-            new TripSummaryDto(trip.Id, trip.Name, trip.StartDate, trip.EndDate, trip.Items.Count));
+            new TripSummaryDto(
+                trip.Id, trip.Name, trip.StartDate, trip.EndDate, trip.Items.Count,
+                // Cover photo: the first (by SortOrder) destination in the trip that
+                // actually has an image — translates to a correlated subquery, so
+                // the list stays one round trip instead of loading every item.
+                trip.Items
+                    .Where(i => i.Destination!.ImageUrl != null)
+                    .OrderBy(i => i.SortOrder)
+                    .Select(i => i.Destination!.ImageUrl)
+                    .FirstOrDefault()));
 
     private static readonly Func<Trip, TripSummaryRow> ToSummaryRowCompiled =
         ToSummaryRowExpression.Compile();

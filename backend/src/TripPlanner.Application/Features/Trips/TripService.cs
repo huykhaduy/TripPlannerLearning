@@ -1,3 +1,4 @@
+using System.Text.Json;
 using FluentValidation;
 using Microsoft.EntityFrameworkCore;
 using TripPlanner.Application.Common.Exceptions;
@@ -26,6 +27,7 @@ public class TripService : ITripService
     private readonly IApplicationDbContext _db;
     private readonly ICurrentUserService _currentUser;
     private readonly IDestinationProvider _destinationProvider;
+    private readonly IImageSearchProvider _imageSearch;
     private readonly IValidator<CreateTripRequest> _createTripValidator;
     private readonly IValidator<UpdateTripRequest> _updateTripValidator;
     private readonly IValidator<AddDestinationRequest> _addDestinationValidator;
@@ -35,6 +37,7 @@ public class TripService : ITripService
         IApplicationDbContext db,
         ICurrentUserService currentUser,
         IDestinationProvider destinationProvider,
+        IImageSearchProvider imageSearch,
         IValidator<CreateTripRequest> createTripValidator,
         IValidator<UpdateTripRequest> updateTripValidator,
         IValidator<AddDestinationRequest> addDestinationValidator,
@@ -43,6 +46,7 @@ public class TripService : ITripService
         _db = db;
         _currentUser = currentUser;
         _destinationProvider = destinationProvider;
+        _imageSearch = imageSearch;
         _createTripValidator = createTripValidator;
         _updateTripValidator = updateTripValidator;
         _addDestinationValidator = addDestinationValidator;
@@ -335,6 +339,24 @@ public class TripService : ITripService
             ?? throw new NotFoundException(nameof(Destination), providerId);
 
         var destination = details.ToEntity();
+
+        // The provider's own image data is sparse (Geoapify only has
+        // wiki_and_media for some places) — fall back to a Serper image search
+        // by name, same source the attraction cards use, so a saved
+        // destination isn't stuck showing the placeholder icon everywhere.
+        if (destination.ImageUrl is null)
+        {
+            try
+            {
+                destination.ImageUrl = await _imageSearch.SearchImageAsync(destination.Name, cancellationToken);
+            }
+            catch (Exception ex) when (IsTransientExternalFailure(ex) && !cancellationToken.IsCancellationRequested)
+            {
+                // Serper down, timed out, or returned something unparseable —
+                // the destination is still saved, just without a photo.
+            }
+        }
+
         _db.Destinations.Add(destination);
 
         try
@@ -350,6 +372,15 @@ public class TripService : ITripService
             return await _db.Destinations.FirstAsync(d => d.ProviderId == providerId, cancellationToken);
         }
     }
+
+    /// <summary>
+    /// True for the external-call failure modes treated as "no image found"
+    /// rather than "the whole request must fail": connection failures,
+    /// HttpClient timeouts (surfaced as TaskCanceledException, not
+    /// HttpRequestException), and an unparseable response body.
+    /// </summary>
+    private static bool IsTransientExternalFailure(Exception ex) =>
+        ex is HttpRequestException or TaskCanceledException or JsonException;
 
     public async Task RemoveDestinationAsync(Guid tripId, Guid itemId, CancellationToken cancellationToken = default)
     {

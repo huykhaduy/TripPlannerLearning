@@ -26,8 +26,8 @@ function getTripStatusLabel(startDate: string | null, endDate: string | null): s
 }
 
 // Deterministic (hashed from the trip id), not random — so a card's header
-// color is stable across reloads. No backend field backs this; it's purely
-// decorative since there's no trip cover-photo feature.
+// color is stable across reloads. Fallback for trips with no destination
+// photo yet (a brand-new trip, or one whose destinations have no image).
 const HEADER_GRADIENTS = [
   'from-brand-600 to-brand-400',
   'from-action-500 to-amber-300',
@@ -37,6 +37,33 @@ const HEADER_GRADIENTS = [
 function headerGradient(id: string): string {
   const hash = [...id].reduce((sum, ch) => sum + ch.charCodeAt(0), 0);
   return HEADER_GRADIENTS[hash % HEADER_GRADIENTS.length];
+}
+
+/** Trip card header: the trip's cover photo, or the gradient fallback above. */
+function TripCardHeader({ id, coverImageUrl, status }: { id: string; coverImageUrl: string | null; status: string | null }) {
+  const [failed, setFailed] = useState(false);
+  const showImage = coverImageUrl && !failed;
+
+  return (
+    <div className={`relative flex h-24 items-end overflow-hidden p-3 ${showImage ? '' : `bg-gradient-to-br ${headerGradient(id)}`}`}>
+      {showImage && (
+        <>
+          <img
+            src={coverImageUrl}
+            alt=""
+            onError={() => setFailed(true)}
+            className="absolute inset-0 h-full w-full object-cover"
+          />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent" />
+        </>
+      )}
+      {status && (
+        <span className="absolute right-3 top-3 rounded-full bg-white/90 px-3 py-1 text-xs font-bold text-slate-900">
+          {status}
+        </span>
+      )}
+    </div>
+  );
 }
 
 /** F3/US1 & US10 — the current user's trip list plus a create-trip form. */
@@ -151,13 +178,7 @@ export function TripsPage() {
             return (
               <Link key={trip.id} to={`/trips/${trip.id}`}>
                 <Card padding="tight" className="flex h-full flex-col gap-0 overflow-hidden p-0">
-                  <div className={`relative flex h-24 items-end bg-gradient-to-br p-3 ${headerGradient(trip.id)}`}>
-                    {status && (
-                      <span className="absolute right-3 top-3 rounded-full bg-white/90 px-3 py-1 text-xs font-bold text-slate-900">
-                        {status}
-                      </span>
-                    )}
-                  </div>
+                  <TripCardHeader id={trip.id} coverImageUrl={trip.coverImageUrl} status={status} />
                   <div className="flex flex-1 flex-col gap-1 p-4">
                     <strong className="font-headline text-slate-900">{trip.name}</strong>
                     <span className="text-sm text-slate-500">{formatDates(trip.startDate, trip.endDate)}</span>

@@ -50,6 +50,7 @@ export interface TripSummary {
   startDate: string | null;
   endDate: string | null;
   destinationCount: number;
+  coverImageUrl: string | null;
 }
 
 // F3 — a destination as it appears inside a trip (TripDestinationDto).
