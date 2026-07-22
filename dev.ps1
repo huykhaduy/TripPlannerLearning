@@ -14,6 +14,9 @@ if (-not (Test-Path "$Root/frontend/node_modules")) {
 if (-not (Test-Path "$Root/frontend/.env")) {
     Copy-Item "$Root/frontend/.env.example" "$Root/frontend/.env"
 }
+if (-not (Test-Path "$Root/backend/src/TripPlanner.WebApi/.env")) {
+    Copy-Item "$Root/backend/src/TripPlanner.WebApi/.env.example" "$Root/backend/src/TripPlanner.WebApi/.env"
+}
 
 # 2. Start each server in a new PowerShell window.
 Write-Host "Starting backend API  -> http://localhost:5080/swagger"

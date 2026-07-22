@@ -20,6 +20,9 @@ fi
 if [ ! -f "$ROOT_DIR/frontend/.env" ]; then
   cp "$ROOT_DIR/frontend/.env.example" "$ROOT_DIR/frontend/.env"
 fi
+if [ ! -f "$ROOT_DIR/backend/src/TripPlanner.WebApi/.env" ]; then
+  cp "$ROOT_DIR/backend/src/TripPlanner.WebApi/.env.example" "$ROOT_DIR/backend/src/TripPlanner.WebApi/.env"
+fi
 
 # 2. Start the backend API (http://localhost:5080).
 echo "Starting backend API…"

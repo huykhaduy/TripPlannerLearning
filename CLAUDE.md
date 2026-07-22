@@ -135,4 +135,9 @@ Arrange with a fresh `CreateDb()`, construct the service under test with real im
 - JWT settings in `appsettings.json` under `"Jwt"` (Key, Issuer, Audience)
 - Database defaults to SQLite (`tripplanner.db` in the WebApi folder). Switch to PostgreSQL by setting `"Database": { "Provider": "Postgres" }` in `appsettings.Development.json` and running `docker compose up -d`.
 - Migrations apply automatically on startup via `ApplyMigrationsAsync` in `Program.cs`.
-- External API: Geoapify key goes in `appsettings.Development.json` under `"Geoapify": { "ApiKey": "..." }`.
+- External API keys (Geoapify, Serper) are git-ignored, local-only secrets loaded from
+  `backend/src/TripPlanner.WebApi/.env` via `DotNetEnv.Env.Load()` in `Program.cs` — copy
+  `.env.example` to `.env` and fill in real keys. Nested config keys use `__` as the
+  separator (e.g. `Geoapify__ApiKey`, `Serper__ApiKey`), since `.env` values become
+  process environment variables and ASP.NET Core's `AddEnvironmentVariables()` treats
+  `__` as the section delimiter.

@@ -10,13 +10,14 @@ using TripPlanner.Infrastructure.Persistence;
 using TripPlanner.WebApi.Middleware;
 using TripPlanner.WebApi.Services;
 
-var builder = WebApplication.CreateBuilder(args);
+// Local overrides (API keys etc.) — git-ignored .env file, loaded into process
+// environment variables before the builder reads them. Config keys use "__" to
+// express nesting (e.g. Geoapify__ApiKey -> Geoapify:ApiKey), since
+// AddEnvironmentVariables() (added by CreateBuilder below) treats "__" as the
+// section separator.
+DotNetEnv.Env.Load();
 
-// Local overrides (API keys etc.) — git-ignored, loaded last so it wins.
-builder.Configuration.AddJsonFile(
-    $"appsettings.{builder.Environment.EnvironmentName}.local.json",
-    optional: true,
-    reloadOnChange: true);
+var builder = WebApplication.CreateBuilder(args);
 
 // ---------------------------------------------------------------------------
 // 1. Register the layers. Each layer owns its own DI extension method, so this

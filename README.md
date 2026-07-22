@@ -84,6 +84,9 @@ cd backend
 dotnet restore
 dotnet build
 
+# API keys (Geoapify, Serper) — copy the template and fill in your own:
+cp src/TripPlanner.WebApi/.env.example src/TripPlanner.WebApi/.env
+
 # Install the EF Core CLI once, if you don't have it:
 dotnet tool install --global dotnet-ef
 
