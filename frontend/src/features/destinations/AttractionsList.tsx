@@ -1,45 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
 import { getAttractions } from '../../api/destinations';
-import { AddToTripButton } from './AddToTripButton';
+import { AttractionCard } from './AttractionCard';
 import { EmptyState } from '../../components/EmptyState';
 import { fieldControlClass } from '../../components/Field';
 import { Button } from '../../components/Button';
 import type { AttractionSummary, LocationSuggestion } from '../../types';
-
-function AttractionCard({ attraction }: { attraction: AttractionSummary }) {
-  const [imageFailed, setImageFailed] = useState(false);
-  const showImage = attraction.imageUrl && !imageFailed;
-
-  return (
-    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-      {/* F2/US1 — open the details view. Add-to-trip stays outside this link
-          so a button never ends up nested inside an anchor. */}
-      <Link to={`/destinations/${encodeURIComponent(attraction.providerId)}`}>
-        {showImage ? (
-          <img
-            src={attraction.imageUrl!}
-            alt={attraction.name}
-            onError={() => setImageFailed(true)}
-            className="aspect-[4/3] w-full object-cover"
-          />
-        ) : (
-          <div className="flex aspect-[4/3] w-full items-center justify-center bg-slate-100 text-4xl">🏛️</div>
-        )}
-        <div className="flex flex-col gap-1 p-4 pb-0">
-          <strong className="text-slate-900">{attraction.name}</strong>
-          {attraction.category && <span className="text-sm text-slate-500">{attraction.category}</span>}
-          {attraction.rating != null && (
-            <span className="text-sm text-slate-700">⭐ {attraction.rating.toFixed(1)}</span>
-          )}
-        </div>
-      </Link>
-      <div className="p-4 pt-3">
-        <AddToTripButton attraction={attraction} />
-      </div>
-    </div>
-  );
-}
 
 /** F1/US3-US5 — recommended attractions near the selected city, with filters and sort. */
 export function AttractionsList({ city }: { city: LocationSuggestion }) {
@@ -105,32 +70,58 @@ export function AttractionsList({ city }: { city: LocationSuggestion }) {
   }
 
   return (
-    <section>
-      <h2 className="mb-4 text-lg font-semibold text-slate-900">Attractions near {city.name}</h2>
+    <section className="flex flex-col gap-6 md:flex-row md:items-start">
+      <aside className="w-full flex-shrink-0 rounded-lg border border-[#E2E8F0] bg-white p-4 md:w-64">
+        <h3 className="font-headline text-base font-semibold text-brand-600">Filters</h3>
 
-      <div className="mb-6 flex flex-wrap items-center gap-3 text-sm">
-        <label className="flex items-center gap-1.5 text-slate-500">
-          Category
-          <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} className={fieldControlClass}>
-            <option value="">All</option>
+        <div className="mt-4">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-[#434654]">Category</p>
+          <div className="flex flex-col gap-1">
+            <button
+              type="button"
+              onClick={() => setCategoryFilter('')}
+              className={`rounded-md px-2 py-1.5 text-left text-sm ${
+                categoryFilter === '' ? 'bg-brand-50 font-semibold text-brand-600' : 'text-slate-700 hover:bg-slate-50'
+              }`}
+            >
+              All destinations
+            </button>
             {categories.map((category) => (
-              <option key={category} value={category}>
+              <button
+                key={category}
+                type="button"
+                onClick={() => setCategoryFilter(category)}
+                className={`rounded-md px-2 py-1.5 text-left text-sm ${
+                  categoryFilter === category
+                    ? 'bg-brand-50 font-semibold text-brand-600'
+                    : 'text-slate-700 hover:bg-slate-50'
+                }`}
+              >
                 {category}
-              </option>
+              </button>
             ))}
-          </select>
-        </label>
+          </div>
+        </div>
 
-        <label className="flex items-center gap-1.5 text-slate-500">
-          Rating
-          <select value={minRating} onChange={(e) => setMinRating(e.target.value)} className={fieldControlClass}>
-            <option value="">Any</option>
-            <option value="3">3+ stars</option>
-            <option value="4">4+ stars</option>
-          </select>
-        </label>
+        <div className="mt-6">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-[#434654]">Minimum rating</p>
+          <div className="flex flex-col gap-1">
+            {(['', '3', '4'] as const).map((value) => (
+              <button
+                key={value || 'any'}
+                type="button"
+                onClick={() => setMinRating(value)}
+                className={`rounded-md px-2 py-1.5 text-left text-sm ${
+                  minRating === value ? 'bg-brand-50 font-semibold text-brand-600' : 'text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                {value === '' ? 'Any rating' : `⭐ ${value}+ stars`}
+              </button>
+            ))}
+          </div>
+        </div>
 
-        <label className="flex items-center gap-1.5 text-slate-500">
+        <label className="mt-6 flex flex-col gap-1.5 text-sm text-slate-500">
           Sort by
           <select
             value={sortBy}
@@ -151,21 +142,25 @@ export function AttractionsList({ city }: { city: LocationSuggestion }) {
               setCategoryFilter('');
               setMinRating('');
             }}
+            className="mt-4 w-full"
           >
             Clear filters
           </Button>
         )}
-      </div>
+      </aside>
 
-      {visible.length === 0 ? (
-        <EmptyState message="No attractions match your filters." />
-      ) : (
-        <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-          {visible.map((attraction) => (
-            <AttractionCard key={attraction.providerId} attraction={attraction} />
-          ))}
-        </div>
-      )}
+      <div className="flex-1">
+        <h2 className="font-headline mb-4 text-lg font-semibold text-slate-900">Attractions near {city.name}</h2>
+        {visible.length === 0 ? (
+          <EmptyState message="No attractions match your filters." />
+        ) : (
+          <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
+            {visible.map((attraction) => (
+              <AttractionCard key={attraction.providerId} attraction={attraction} />
+            ))}
+          </div>
+        )}
+      </div>
     </section>
   );
 }

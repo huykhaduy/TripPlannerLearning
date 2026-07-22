@@ -1,13 +1,14 @@
 import type { ButtonHTMLAttributes } from 'react';
 
-type ButtonVariant = 'primary' | 'secondary' | 'outline' | 'danger';
+type ButtonVariant = 'primary' | 'action' | 'secondary' | 'outline' | 'danger';
 type ButtonSize = 'md' | 'sm';
 
 const VARIANT_CLASSES: Record<ButtonVariant, string> = {
   primary: 'bg-brand-600 text-white hover:bg-brand-700',
+  // Orange — reserved for the one primary call-to-action per view (Add to
+  // trip, Create trip, Plan new trip), per the Stitch design system.
+  action: 'bg-action-500 text-white hover:bg-action-600',
   secondary: 'border border-slate-300 text-slate-700 hover:bg-slate-50',
-  // Brand-tinted outline — for calls to action that need to stand out (e.g.
-  // "Add to trip") without the visual weight of a filled primary button.
   outline: 'border border-brand-200 text-brand-600 hover:bg-brand-50',
   danger: 'border border-red-200 text-red-600 hover:bg-red-50',
 };

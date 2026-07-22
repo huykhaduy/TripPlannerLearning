@@ -16,9 +16,9 @@ export function SearchPage() {
 
   return (
     <div className="flex flex-col gap-8">
-      <div className="rounded-3xl bg-brand-600 px-6 py-14 text-center shadow-sm sm:py-20">
-        <h1 className="text-4xl font-semibold tracking-tight text-white sm:text-5xl">Where to next?</h1>
-        <p className="mt-3 text-brand-50">Search a city to see its recommended attractions.</p>
+      <div className="rounded-3xl bg-brand-600 px-6 py-14 text-center sm:py-20">
+        <h1 className="font-headline text-4xl font-bold tracking-tight text-white sm:text-5xl">Where to next?</h1>
+        <p className="mt-3 text-brand-100">Search a city to see its recommended attractions.</p>
         <div className="mx-auto mt-6 max-w-xl">
           <CitySearchInput onSelect={setSelectedCity} />
         </div>

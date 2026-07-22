@@ -4,6 +4,7 @@ import axios from 'axios';
 import { getDestinationDetails } from '../../api/destinations';
 import { AddToTripButton } from './AddToTripButton';
 import { Card } from '../../components/Card';
+import { NearbyAttractions } from './NearbyAttractions';
 import type { DestinationDetails } from '../../types';
 
 /**
@@ -62,62 +63,84 @@ export function DestinationDetailsPage() {
   const showImage = details.imageUrl && !imageFailed;
 
   return (
-    <div className="mx-auto max-w-3xl">
+    <div className="mx-auto max-w-5xl">
       <Link to="/" className="text-sm text-brand-600 hover:underline">
         ← Back to search
       </Link>
 
-      {showImage ? (
-        <img
-          src={details.imageUrl!}
-          alt={details.name}
-          onError={() => setImageFailed(true)}
-          className="mt-3 h-80 w-full rounded-2xl object-cover"
-        />
-      ) : (
-        <div className="mt-3 flex h-80 w-full items-center justify-center rounded-2xl bg-slate-100 text-6xl">
-          🏛️
-        </div>
-      )}
-
-      <div className="mt-6">
-        <h1 className="text-3xl font-semibold tracking-tight text-slate-900">{details.name}</h1>
-        {details.category && <p className="mt-1 text-sm text-slate-500">{details.category}</p>}
-        {details.description && <p className="mt-4 text-slate-700">{details.description}</p>}
-
-        <dl className="mt-6 flex flex-col gap-3 text-sm">
-          <div>
-            <dt className="font-medium text-slate-500">Address</dt>
-            <dd className="mt-0.5 text-slate-900">{details.address ?? 'Not available'}</dd>
-          </div>
-          <div>
-            <dt className="font-medium text-slate-500">Opening hours</dt>
-            <dd className="mt-0.5 text-slate-900">{details.openingHours ?? 'Opening hours not available'}</dd>
-          </div>
-          {details.website && (
-            <div>
-              <dt className="font-medium text-slate-500">Website</dt>
-              <dd className="mt-0.5">
-                <a href={details.website} target="_blank" rel="noreferrer" className="text-brand-600 hover:underline">
-                  {details.website}
-                </a>
-              </dd>
-            </div>
-          )}
-        </dl>
-
-        <div className="mt-6 max-w-xs">
-          <AddToTripButton
-            attraction={{
-              providerId: details.providerId,
-              name: details.name,
-              category: details.category,
-              imageUrl: details.imageUrl,
-              rating: null,
-            }}
+      <div className="relative mt-3 h-80 w-full overflow-hidden rounded-2xl sm:h-96">
+        {showImage ? (
+          <img
+            src={details.imageUrl!}
+            alt={details.name}
+            onError={() => setImageFailed(true)}
+            className="h-full w-full object-cover"
           />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center bg-slate-100 text-6xl">🏛️</div>
+        )}
+        <div className="absolute inset-0 flex flex-col justify-end bg-gradient-to-t from-black/70 via-black/10 to-transparent p-6 text-white">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              {details.category && (
+                <span className="inline-block rounded-full bg-brand-600 px-3 py-1 text-xs font-semibold">
+                  {details.category}
+                </span>
+              )}
+              <h1 className="font-headline mt-2 text-3xl font-bold tracking-tight sm:text-4xl">{details.name}</h1>
+            </div>
+            <div className="w-full sm:w-auto">
+              <AddToTripButton
+                attraction={{
+                  providerId: details.providerId,
+                  name: details.name,
+                  category: details.category,
+                  imageUrl: details.imageUrl,
+                  rating: null,
+                }}
+              />
+            </div>
+          </div>
         </div>
       </div>
+
+      <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
+        <div className="lg:col-span-2">{details.description && <p className="text-slate-700">{details.description}</p>}</div>
+
+        <Card padding="tight" className="h-fit">
+          <h2 className="font-headline text-base font-semibold text-brand-600">Practical info</h2>
+          <dl className="mt-3 flex flex-col gap-3 text-sm">
+            <div>
+              <dt className="font-medium text-slate-500">Address</dt>
+              <dd className="mt-0.5 text-slate-900">{details.address ?? 'Not available'}</dd>
+            </div>
+            <div>
+              <dt className="font-medium text-slate-500">Opening hours</dt>
+              <dd className="mt-0.5 text-slate-900">{details.openingHours ?? 'Opening hours not available'}</dd>
+            </div>
+            {details.website && (
+              <div>
+                <dt className="font-medium text-slate-500">Website</dt>
+                <dd className="mt-0.5">
+                  <a href={details.website} target="_blank" rel="noreferrer" className="text-brand-600 hover:underline">
+                    {details.website}
+                  </a>
+                </dd>
+              </div>
+            )}
+          </dl>
+        </Card>
+      </div>
+
+      {details.latitude != null && details.longitude != null && (
+        <div className="mt-8">
+          <NearbyAttractions
+            latitude={details.latitude}
+            longitude={details.longitude}
+            excludeProviderId={details.providerId}
+          />
+        </div>
+      )}
     </div>
   );
 }

@@ -37,6 +37,7 @@ function DestinationList({
   onDragStart,
   onDragEnd,
   onDrop,
+  isMatch,
 }: {
   dayId: string | null;
   destinations: TripDestination[];
@@ -46,7 +47,13 @@ function DestinationList({
   onDragStart: (itemId: string) => void;
   onDragEnd: () => void;
   onDrop: (targetDayId: string | null, position: number) => void;
+  // Optional visual-only filter (the Saved Places search box). Rows are
+  // hidden with CSS rather than removed from the array so index-based drop
+  // positions stay correct regardless of what's currently filtered out.
+  isMatch?: (destination: TripDestination) => boolean;
 }) {
+  const anyVisible = !isMatch || destinations.length === 0 || destinations.some(isMatch);
+
   return (
     <div
       onDragOver={(e) => e.preventDefault()} // required, or the browser refuses the drop
@@ -55,6 +62,10 @@ function DestinationList({
       {destinations.length === 0 ? (
         <p className="mt-3 rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">
           {emptyHint}
+        </p>
+      ) : !anyVisible ? (
+        <p className="mt-3 rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">
+          No matches.
         </p>
       ) : (
         <ul className="mt-3 flex flex-col gap-2">
@@ -69,22 +80,27 @@ function DestinationList({
                 e.stopPropagation(); // this drop is ours — don't also append via the list handler
                 onDrop(dayId, index);
               }}
-              className="flex cursor-grab items-center gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 active:cursor-grabbing"
+              className={`group relative flex cursor-grab items-center gap-3 rounded-lg border border-[#E2E8F0] bg-white px-3 py-2 shadow-sm active:cursor-grabbing ${
+                isMatch && !isMatch(destination) ? 'hidden' : ''
+              }`}
             >
               <span className="select-none text-slate-400" aria-hidden="true">
                 ⠿
               </span>
               <DestinationThumbnail imageUrl={destination.imageUrl} name={destination.name} />
-              <span className="flex-1 text-slate-900">{destination.name}</span>
-              <Button
+              <span className="flex-1 truncate text-slate-900">{destination.name}</span>
+              {/* Icon-only affordance matching the mockup's hover-reveal "×" —
+                  distinct enough from the shared Button's variants that a
+                  plain <button> reads better here than forcing a Button variant. */}
+              <button
                 type="button"
-                variant="danger"
-                size="sm"
                 onClick={() => onRemove(destination.itemId)}
                 disabled={removingItemId === destination.itemId}
+                aria-label={`Remove ${destination.name}`}
+                className="rounded-full p-1 text-slate-300 opacity-0 transition-opacity hover:bg-red-50 hover:text-red-600 disabled:opacity-100 group-hover:opacity-100"
               >
-                {removingItemId === destination.itemId ? 'Removing…' : 'Remove'}
-              </Button>
+                {removingItemId === destination.itemId ? '…' : '✕'}
+              </button>
             </li>
           ))}
         </ul>
@@ -145,6 +161,8 @@ export function TripDetailPage() {
 
   const [dragItemId, setDragItemId] = useState<string | null>(null);
   const [moveError, setMoveError] = useState<string | null>(null);
+
+  const [savedPlacesQuery, setSavedPlacesQuery] = useState('');
 
   // Sync both the page and the edit form from a freshly fetched/saved trip.
   function applyTrip(fresh: TripDetail) {
@@ -285,29 +303,59 @@ export function TripDetailPage() {
 
   const hasDays = trip.days.length > 0;
 
+  const isDirty =
+    name !== trip.name || startDate !== (trip.startDate ?? '') || endDate !== (trip.endDate ?? '');
+  const saveStatusLabel = saving ? 'Saving…' : saveError ? 'Error saving' : isDirty ? 'Unsaved changes' : 'All changes saved';
+
   const savedPlacesSection = (
-    <section>
-      <h2 className="text-lg font-semibold text-slate-900">Saved Places</h2>
-      <DestinationList
-        dayId={null}
-        destinations={trip.savedPlaces}
-        emptyHint="No saved places — add destinations from the Discover page."
-        onRemove={handleRemove}
-        removingItemId={removingItemId}
-        onDragStart={setDragItemId}
-        onDragEnd={() => setDragItemId(null)}
-        onDrop={handleDrop}
+    <section className="flex h-full flex-col rounded-lg border border-[#E2E8F0] bg-white p-4">
+      <h2 className="font-headline text-base font-semibold text-brand-600">Saved Places</h2>
+      <p className="text-xs text-slate-500">Drag items into a day to schedule them.</p>
+      <input
+        type="search"
+        value={savedPlacesQuery}
+        onChange={(e) => setSavedPlacesQuery(e.target.value)}
+        placeholder="Search saved…"
+        aria-label="Search saved places"
+        className="mt-3 rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-sm focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-600/10"
       />
+      <div className="mt-3 flex-1 overflow-y-auto">
+        <DestinationList
+          dayId={null}
+          destinations={trip.savedPlaces}
+          emptyHint="No saved places — add destinations from the Explore page."
+          onRemove={handleRemove}
+          removingItemId={removingItemId}
+          onDragStart={setDragItemId}
+          onDragEnd={() => setDragItemId(null)}
+          onDrop={handleDrop}
+          isMatch={
+            savedPlacesQuery.trim() === ''
+              ? undefined
+              : (d) => d.name.toLowerCase().includes(savedPlacesQuery.trim().toLowerCase())
+          }
+        />
+      </div>
     </section>
   );
 
   return (
     <div className="flex flex-col gap-8">
-      <div>
-        <Link to="/trips" className="text-sm text-brand-600 hover:underline">
-          ← Back to my trips
-        </Link>
-        <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-900">{trip.name}</h1>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <Link to="/trips" className="text-sm text-brand-600 hover:underline">
+            ← Back to my trips
+          </Link>
+          <h1 className="font-headline mt-2 text-3xl font-bold tracking-tight text-slate-900">{trip.name}</h1>
+        </div>
+        <span
+          className={`flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold ${
+            saveError ? 'bg-red-50 text-red-600' : 'bg-brand-50 text-brand-600'
+          }`}
+        >
+          <span aria-hidden="true">{saving ? '⏳' : '☁️'}</span>
+          {saveStatusLabel}
+        </span>
       </div>
 
       <Card>
@@ -348,11 +396,13 @@ export function TripDetailPage() {
       {moveError && <p className="text-sm text-red-600">{moveError}</p>}
 
       {hasDays ? (
-        <div className="flex flex-col gap-8 lg:flex-row lg:items-start">
-          <div className="flex flex-col gap-6 lg:flex-1">
+        <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
+          <div className="lg:sticky lg:top-8 lg:w-72 lg:shrink-0">{savedPlacesSection}</div>
+
+          <div className="flex flex-1 gap-6 overflow-x-auto pb-4">
             {trip.days.map((day) => (
-              <section key={day.id}>
-                <h2 className="text-lg font-semibold text-slate-900">
+              <section key={day.id} className="flex w-72 shrink-0 flex-col gap-3 rounded-lg bg-[#F8FAFC] p-3">
+                <h2 className="font-headline text-base font-semibold text-slate-900">
                   Day {day.dayNumber} <span className="font-normal text-slate-500">{day.date}</span>
                 </h2>
                 <DestinationList
@@ -368,8 +418,6 @@ export function TripDetailPage() {
               </section>
             ))}
           </div>
-
-          <div className="lg:sticky lg:top-8 lg:w-80 lg:shrink-0">{savedPlacesSection}</div>
         </div>
       ) : (
         <>

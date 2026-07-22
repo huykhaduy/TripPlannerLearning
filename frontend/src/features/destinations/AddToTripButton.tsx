@@ -47,7 +47,7 @@ export function AddToTripButton({ attraction }: { attraction: AttractionSummary 
 
   return (
     <>
-      <Button type="button" variant="outline" size="sm" onClick={handleClick} className="w-full">
+      <Button type="button" variant="action" size="sm" onClick={handleClick} className="w-full">
         {justAdded ? 'Added ✓' : 'Add to trip'}
       </Button>
       {open && (

@@ -11,11 +11,11 @@ interface CardProps extends HTMLAttributes<HTMLDivElement> {
   padding?: CardPadding;
 }
 
-/** The one card shell used for page content, replacing the repeated border/shadow wrapper. */
+/** The one card shell used for page content. Flat at rest, shadow only on hover (Stitch design system). */
 export function Card({ padding = 'normal', className = '', ...rest }: CardProps) {
   return (
     <div
-      className={`rounded-2xl border border-slate-200 bg-white shadow-sm ${PADDING_CLASSES[padding]} ${className}`}
+      className={`rounded-lg border border-[#E2E8F0] bg-white transition-shadow hover:shadow-sm ${PADDING_CLASSES[padding]} ${className}`}
       {...rest}
     />
   );
