@@ -13,9 +13,10 @@ namespace TripPlanner.Application.Tests.Destinations;
 
 /// <summary>
 /// Unit tests for Feature 1 (US1-3 search/attractions) and Feature 2 (US1
-/// details). The service's dependencies are the provider (mocked — we never
-/// hit the real Geoapify API in tests), the validators (real — pure logic),
-/// and for GetDetailsAsync's DB fallback, an in-memory EF Core database.
+/// details). The service's dependencies are the provider and image search
+/// (mocked — we never hit the real Geoapify/Serper APIs in tests), the
+/// validators (real — pure logic), and for GetDetailsAsync's DB fallback, an
+/// in-memory EF Core database.
 /// </summary>
 public class DestinationServiceTests
 {
@@ -60,9 +61,23 @@ public class DestinationServiceTests
         public override DateTimeOffset GetUtcNow() => Now;
     }
 
+    /// <summary>An image provider that never finds anything, by default — tests that
+    /// care about ImageUrl pass their own mock instead.</summary>
+    private static Mock<IImageSearchProvider> NoOpImageSearch()
+    {
+        var imageSearch = new Mock<IImageSearchProvider>();
+        imageSearch
+            .Setup(p => p.SearchImageAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string?)null);
+        return imageSearch;
+    }
+
     private static DestinationService CreateSut(
-        ApplicationDbContext db, Mock<IDestinationProvider> provider, FakeClock? clock = null) =>
-        new(db, provider.Object,
+        ApplicationDbContext db,
+        Mock<IDestinationProvider> provider,
+        FakeClock? clock = null,
+        Mock<IImageSearchProvider>? imageSearch = null) =>
+        new(db, provider.Object, (imageSearch ?? NoOpImageSearch()).Object,
             new MemoryCache(new MemoryCacheOptions()), clock ?? new FakeClock(),
             new SearchLocationsRequestValidator(), new GetAttractionsRequestValidator(),
             new GetDestinationDetailsRequestValidator());

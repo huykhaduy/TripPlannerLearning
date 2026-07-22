@@ -36,6 +36,19 @@ public static class DependencyInjection
             client.BaseAddress = new Uri(baseUrl);
         });
 
+        // Image search, used to fill in attraction thumbnails the destination
+        // provider itself doesn't return (typed HttpClient + bound settings).
+        // Short timeout: this runs up to MaxDegreeOfParallelism-at-a-time per
+        // attraction in a list, so one hung call shouldn't hold up the batch
+        // anywhere near the 100s HttpClient default.
+        services.Configure<SerperSettings>(configuration.GetSection(SerperSettings.SectionName));
+        services.AddHttpClient<IImageSearchProvider, SerperImageClient>(client =>
+        {
+            var baseUrl = configuration["Serper:BaseUrl"] ?? "https://google.serper.dev/";
+            client.BaseAddress = new Uri(baseUrl);
+            client.Timeout = TimeSpan.FromSeconds(8);
+        });
+
         return services;
     }
 

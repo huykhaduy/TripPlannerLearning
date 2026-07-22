@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+using System.Text.Json;
 using FluentValidation;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
@@ -26,6 +28,17 @@ public class DestinationService : IDestinationService
     private const int MaxLocationResults = 5;
     private const int MaxAttractionResults = 20;
 
+    // The destination provider's own image data is sparse (Geoapify only has
+    // wiki_and_media for some places), so filling in thumbnails means one
+    // extra image-search lookup per result — capped in parallel so a
+    // 20-result page doesn't hammer the image search provider (a paid,
+    // per-query API) all at once.
+    private const int ImageFetchConcurrency = 5;
+
+    // How long a resolved (or "nothing found") image is cached per place, so
+    // a paid Serper query is never repeated for the same attraction.
+    private static readonly TimeSpan ImageTtl = TimeSpan.FromHours(24);
+
     // TTLs per spec §11.2 — POI data is nearly static.
     private static readonly TimeSpan LocationsTtl = TimeSpan.FromHours(24);
     private static readonly TimeSpan AttractionsTtl = TimeSpan.FromHours(6);
@@ -38,6 +51,7 @@ public class DestinationService : IDestinationService
 
     private readonly IApplicationDbContext _db;
     private readonly IDestinationProvider _provider;
+    private readonly IImageSearchProvider _imageSearch;
     private readonly IMemoryCache _cache;
     private readonly TimeProvider _clock;
     private readonly IValidator<SearchLocationsRequest> _searchValidator;
@@ -47,6 +61,7 @@ public class DestinationService : IDestinationService
     public DestinationService(
         IApplicationDbContext db,
         IDestinationProvider provider,
+        IImageSearchProvider imageSearch,
         IMemoryCache cache,
         TimeProvider clock,
         IValidator<SearchLocationsRequest> searchValidator,
@@ -55,6 +70,7 @@ public class DestinationService : IDestinationService
     {
         _db = db;
         _provider = provider;
+        _imageSearch = imageSearch;
         _cache = cache;
         _clock = clock;
         _searchValidator = searchValidator;
@@ -151,21 +167,102 @@ public class DestinationService : IDestinationService
 
                 // "Recommended" default sort (spec §11.2): rating descending, unrated
                 // last — which with Geoapify (no ratings) degrades to provider order.
-                return attractions
+                // Ranked/capped BEFORE image enrichment so we only spend extra provider
+                // calls on the ≤20 results we actually return.
+                var ranked = attractions
                     .OrderBy(a => a.Rating is null)
                     .ThenByDescending(a => a.Rating)
                     .Take(MaxAttractionResults)
                     .ToList();
+
+                return await EnrichWithImagesAsync(ranked, cancellationToken);
             });
     }
 
-    public async Task<DestinationDetailsDto> GetDetailsAsync(string providerId, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Fills in each attraction's ImageUrl. A failed lookup for one place just
+    /// leaves that one imageless — it must never take down the whole list.
+    /// </summary>
+    private async Task<IReadOnlyList<DestinationSummaryDto>> EnrichWithImagesAsync(
+        IReadOnlyList<DestinationSummaryDto> attractions, CancellationToken cancellationToken)
     {
-        await _detailsValidator.ValidateAndThrowAppExceptionAsync(
-            new GetDestinationDetailsRequest(providerId), cancellationToken);
+        var images = new ConcurrentDictionary<string, string?>();
 
-        // Cache is checked by hand (not via GetCachedAsync) because a null
-        // provider answer must NOT be cached and must fall through to the DB.
+        await Parallel.ForEachAsync(
+            attractions,
+            new ParallelOptions { MaxDegreeOfParallelism = ImageFetchConcurrency, CancellationToken = cancellationToken },
+            async (attraction, ct) =>
+            {
+                images[attraction.ProviderId] = await GetAttractionImageAsync(attraction, ct);
+            });
+
+        return attractions
+            .Select(a => a with { ImageUrl = images.GetValueOrDefault(a.ProviderId) })
+            .ToList();
+    }
+
+    /// <summary>
+    /// Serper (Google Images) first, since it finds a photo for far more places
+    /// than the destination provider's own sparse image data; falls back to the
+    /// provider's (Wikimedia-sourced) details image, then to whatever image the
+    /// attraction already carried from the list call itself, and finally to a
+    /// stale cached image rather than blanking out a thumbnail that used to
+    /// have one. In practice Serper rarely returns a truly empty result, even
+    /// for an unrelated query, so a non-null hit is a best-effort "top hit",
+    /// not a confirmed match — the later fallbacks mostly only fire when
+    /// Serper itself is unreachable or times out.
+    /// </summary>
+    private async Task<string?> GetAttractionImageAsync(DestinationSummaryDto attraction, CancellationToken cancellationToken)
+    {
+        var key = $"img:{attraction.ProviderId}";
+        var stale = _cache.TryGetValue(key, out CacheEnvelope<string?>? envelope) ? envelope : null;
+        if (stale is not null && _clock.GetUtcNow() - stale.FetchedAt < ImageTtl)
+        {
+            return stale.Value;
+        }
+
+        string? image = null;
+        try
+        {
+            image = await _imageSearch.SearchImageAsync(attraction.Name, cancellationToken);
+        }
+        catch (Exception ex) when (IsTransientExternalFailure(ex) && !cancellationToken.IsCancellationRequested)
+        {
+            // Serper down, timed out, or returned something unparseable — fall
+            // through to the next source rather than failing the whole list.
+        }
+
+        // GetCachedProviderDetailsAsync already absorbs its own transient
+        // failures (see its catch clause) and returns null rather than throwing.
+        image ??= (await GetCachedProviderDetailsAsync(attraction.ProviderId, cancellationToken))?.ImageUrl;
+        image ??= attraction.ImageUrl; // last resort: whatever the list call itself already had
+        image ??= stale?.Value; // nothing resolved this round — prefer a stale image over none at all
+
+        _cache.Set(key, new CacheEnvelope<string?>(image, _clock.GetUtcNow()), CacheRetention);
+        return image;
+    }
+
+    /// <summary>
+    /// True for the external-call failure modes we treat as "this source
+    /// didn't come through" rather than "the whole request must fail":
+    /// connection failures, HttpClient timeouts (which surface as
+    /// TaskCanceledException, not HttpRequestException), and a response body
+    /// that doesn't deserialize as expected. Excludes a genuine caller-driven
+    /// cancellation, which should propagate rather than be swallowed as
+    /// "no result".
+    /// </summary>
+    private static bool IsTransientExternalFailure(Exception ex) =>
+        ex is HttpRequestException or TaskCanceledException or JsonException;
+
+    /// <summary>
+    /// Cache-aside fetch of one place's details, shared by <see cref="GetDetailsAsync"/>
+    /// and the attractions-list image enrichment above — a place looked up during
+    /// enrichment is already cached by the time the user clicks into its detail page.
+    /// A null provider answer is deliberately NOT cached (checked by hand, not via
+    /// <see cref="GetCachedAsync{T}"/>) so a transient "not found" doesn't stick.
+    /// </summary>
+    private async Task<DestinationDetailsDto?> GetCachedProviderDetailsAsync(string providerId, CancellationToken cancellationToken)
+    {
         var key = $"details:{providerId}";
         var stale = _cache.TryGetValue(key, out CacheEnvelope<DestinationDetailsDto>? envelope) ? envelope : null;
         if (stale is not null && _clock.GetUtcNow() - stale.FetchedAt < DetailsTtl)
@@ -173,28 +270,37 @@ public class DestinationService : IDestinationService
             return stale.Value;
         }
 
-        // F2/US1 (spec §11.3): the provider has the freshest data, but it can
-        // say "no such place" (null) or be unreachable (throws) — either way we
-        // fall back to our own cache, never persisting here (DestinationService
-        // never writes; only TripService.AddDestinationAsync upserts).
         DestinationDetailsDto? details;
         try
         {
             details = await _provider.GetDestinationDetailsAsync(providerId, cancellationToken);
         }
-        catch (HttpRequestException)
+        catch (Exception ex) when (IsTransientExternalFailure(ex) && !cancellationToken.IsCancellationRequested)
         {
-            if (stale is not null)
-            {
-                return stale.Value; // stale-better-than-down (spec §11.2)
-            }
-
-            details = null;
+            return stale?.Value; // stale-better-than-down (spec §11.2), else null
         }
 
         if (details is not null)
         {
             _cache.Set(key, new CacheEnvelope<DestinationDetailsDto>(details, _clock.GetUtcNow()), CacheRetention);
+        }
+
+        return details;
+    }
+
+    public async Task<DestinationDetailsDto> GetDetailsAsync(string providerId, CancellationToken cancellationToken = default)
+    {
+        await _detailsValidator.ValidateAndThrowAppExceptionAsync(
+            new GetDestinationDetailsRequest(providerId), cancellationToken);
+
+        // F2/US1 (spec §11.3): the provider has the freshest data, but it can
+        // say "no such place" (null) or be unreachable (falls back to stale
+        // cache inside the helper) — either way, a final null falls through to
+        // our own DB (DestinationService never writes; only
+        // TripService.AddDestinationAsync upserts).
+        var details = await GetCachedProviderDetailsAsync(providerId, cancellationToken);
+        if (details is not null)
+        {
             return details;
         }
 
