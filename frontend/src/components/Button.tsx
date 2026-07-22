@@ -5,7 +5,7 @@ type ButtonSize = 'md' | 'sm';
 
 const VARIANT_CLASSES: Record<ButtonVariant, string> = {
   primary: 'bg-brand-600 text-white hover:bg-brand-700',
-  // Orange — reserved for the one primary call-to-action per view (Add to
+  // Reserved for the one primary call-to-action per view (Add to
   // trip, Create trip, Plan new trip), per the Stitch design system.
   action: 'bg-action-500 text-white hover:bg-action-600',
   secondary: 'border border-slate-300 text-slate-700 hover:bg-slate-50',
