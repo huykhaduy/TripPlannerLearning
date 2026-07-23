@@ -12,15 +12,34 @@ function formatCity(city: LocationSuggestion): string {
 }
 
 /** F1/US1-2 — debounced city autocomplete. Calls onSelect when a suggestion is picked. */
-export function CitySearchInput({ onSelect }: { onSelect: (city: LocationSuggestion) => void }) {
-  const [query, setQuery] = useState('');
+export function CitySearchInput({
+  onSelect,
+  initialCity,
+}: {
+  onSelect: (city: LocationSuggestion) => void;
+  initialCity?: LocationSuggestion | null;
+}) {
+  const initialLabel = initialCity ? formatCity(initialCity) : '';
+  const [query, setQuery] = useState(initialLabel);
   const [suggestions, setSuggestions] = useState<LocationSuggestion[]>([]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Selecting a suggestion writes its label into the input, which would
   // re-trigger the search below and reopen the dropdown — skip that query.
-  const [pickedLabel, setPickedLabel] = useState<string | null>(null);
+  // Also seeded from initialCity so a restored city (from the URL) doesn't
+  // immediately re-search itself on mount.
+  const [pickedLabel, setPickedLabel] = useState<string | null>(initialLabel || null);
+
+  // The useState initializers above only seed the FIRST render. Without this,
+  // browser back/forward restoring a DIFFERENT city in the URL updates the
+  // results below (SearchPage reads the URL directly) but leaves this input
+  // showing whatever the user last typed/picked — this resyncs it whenever
+  // the actual selected-city label changes underneath the component.
+  useEffect(() => {
+    setQuery(initialLabel);
+    setPickedLabel(initialLabel || null);
+  }, [initialLabel]);
 
   const debouncedQuery = useDebounce(query, 300);
 

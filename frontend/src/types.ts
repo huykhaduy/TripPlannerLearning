@@ -41,6 +41,8 @@ export interface DestinationDetails {
   address: string | null;
   website: string | null;
   openingHours: string | null;
+  // F2/US2 — the photo gallery shown in the details view's carousel; empty (not null) when nothing was found.
+  imageUrls: string[];
 }
 
 // F3/US10 — summary row in the trip list (TripSummaryDto).

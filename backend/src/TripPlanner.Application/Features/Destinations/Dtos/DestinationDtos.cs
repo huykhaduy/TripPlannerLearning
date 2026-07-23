@@ -21,6 +21,8 @@ public record DestinationSummaryDto(
     double? Rating);
 
 /// <summary>F2/US1 — full details shown in the destination detail view.</summary>
+/// <param name="ImageUrl">The primary/hero photo — first of <see cref="ImageUrls"/>, kept for callers that only need a single thumbnail (e.g. "Add to trip").</param>
+/// <param name="ImageUrls">F2/US2 — the photo gallery shown in the details view's carousel. Empty (not null) when nothing was found.</param>
 public record DestinationDetailsDto(
     string ProviderId,
     string Name,
@@ -31,4 +33,5 @@ public record DestinationDetailsDto(
     double? Longitude,
     string? Address,
     string? Website,
-    string? OpeningHours);
+    string? OpeningHours,
+    IReadOnlyList<string>? ImageUrls = null);

@@ -69,6 +69,9 @@ public class DestinationServiceTests
         imageSearch
             .Setup(p => p.SearchImageAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string?)null);
+        imageSearch
+            .Setup(p => p.SearchImagesAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((IReadOnlyList<string>)[]);
         return imageSearch;
     }
 
@@ -255,6 +258,70 @@ public class DestinationServiceTests
 
         Assert.Equal("Golden Bridge", result.Name);
         Assert.Equal("A hand-shaped bridge.", result.Description);
+    }
+
+    [Fact]
+    public async Task GetDetailsAsync_UsesImageSearchProvider_ForPhotoGallery()
+    {
+        var details = new DestinationDetailsDto(
+            "geo-1", "Golden Bridge", "tourism", "A hand-shaped bridge.", "provider.jpg",
+            15.9, 108.0, "Da Nang", "https://example.com", "9am-5pm");
+        var imageSearch = new Mock<IImageSearchProvider>();
+        imageSearch
+            .Setup(p => p.SearchImagesAsync("Golden Bridge", It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((IReadOnlyList<string>)["a.jpg", "b.jpg", "c.jpg"]);
+        var sut = CreateSut(CreateDb(), ProviderReturning(details), imageSearch: imageSearch);
+
+        var result = await sut.GetDetailsAsync("geo-1");
+
+        Assert.Equal(["a.jpg", "b.jpg", "c.jpg"], result.ImageUrls);
+        Assert.Equal("a.jpg", result.ImageUrl); // primary photo mirrors the gallery's first image
+    }
+
+    [Fact]
+    public async Task GetDetailsAsync_WhenImageSearchFindsNothing_FallsBackToProviderImage()
+    {
+        var details = new DestinationDetailsDto(
+            "geo-1", "Golden Bridge", null, null, "provider.jpg", null, null, null, null, null);
+        var sut = CreateSut(CreateDb(), ProviderReturning(details)); // NoOpImageSearch -> empty gallery
+
+        var result = await sut.GetDetailsAsync("geo-1");
+
+        Assert.Equal(["provider.jpg"], result.ImageUrls);
+        Assert.Equal("provider.jpg", result.ImageUrl);
+    }
+
+    [Fact]
+    public async Task GetAttractionsAsync_ThenGetDetailsAsync_ShareOneImageCacheEntry()
+    {
+        // Regression test: the list and the details view used to query and cache
+        // Serper independently (img:{id} vs imgs:{id}), so the same destination
+        // could show a different "top hit" photo on each. They now share one
+        // cache entry, so both must agree — and Serper is only queried once.
+        var provider = new Mock<IDestinationProvider>();
+        provider
+            .Setup(p => p.GetAttractionsAsync(It.IsAny<double>(), It.IsAny<double>(), It.IsAny<double>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new DestinationSummaryDto("geo-1", "Golden Bridge", null, null, null)]);
+        provider
+            .Setup(p => p.GetDestinationDetailsAsync("geo-1", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DestinationDetailsDto(
+                "geo-1", "Golden Bridge", null, null, null, null, null, null, null, null));
+
+        var imageSearch = new Mock<IImageSearchProvider>();
+        imageSearch
+            .Setup(p => p.SearchImagesAsync("Golden Bridge", It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((IReadOnlyList<string>)["a.jpg", "b.jpg"]);
+        var sut = CreateSut(CreateDb(), provider, imageSearch: imageSearch);
+
+        var listResult = await sut.GetAttractionsAsync(latitude: 0, longitude: 0, radiusKm: 20);
+        var detailsResult = await sut.GetDetailsAsync("geo-1");
+
+        Assert.Equal("a.jpg", Assert.Single(listResult).ImageUrl);
+        Assert.Equal("a.jpg", detailsResult.ImageUrl);
+        Assert.Equal(["a.jpg", "b.jpg"], detailsResult.ImageUrls);
+        imageSearch.Verify(
+            p => p.SearchImagesAsync("Golden Bridge", It.IsAny<int>(), It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 
     [Fact]

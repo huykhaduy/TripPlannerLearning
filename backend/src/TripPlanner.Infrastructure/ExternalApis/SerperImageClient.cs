@@ -22,14 +22,17 @@ public class SerperImageClient : IImageSearchProvider
         _settings = settings.Value;
     }
 
-    public async Task<string?> SearchImageAsync(string query, CancellationToken cancellationToken = default)
+    public async Task<string?> SearchImageAsync(string query, CancellationToken cancellationToken = default) =>
+        (await SearchImagesAsync(query, maxResults: 1, cancellationToken)).FirstOrDefault();
+
+    public async Task<IReadOnlyList<string>> SearchImagesAsync(string query, int maxResults, CancellationToken cancellationToken = default)
     {
         // Unconfigured (e.g. a fresh clone without the git-ignored local key) means
         // every call would round-trip to Serper only to get a guaranteed 401 — treat
         // it the same as "nothing found" instead of paying that latency for nothing.
         if (string.IsNullOrEmpty(_settings.ApiKey))
         {
-            return null;
+            return [];
         }
 
         using var request = new HttpRequestMessage(HttpMethod.Post, "images")
@@ -42,11 +45,20 @@ public class SerperImageClient : IImageSearchProvider
         response.EnsureSuccessStatusCode();
 
         var payload = await response.Content.ReadFromJsonAsync<ImageSearchResponse>(cancellationToken);
+        if (payload?.Images is null)
+        {
+            return [];
+        }
 
         // Google Image Search almost never comes back with a truly empty result
-        // set, even for a nonsense query — so the "top hit" is a best guess, not
-        // a confirmed match for the place. Callers must treat it as best-effort.
-        return payload?.Images?.FirstOrDefault()?.ImageUrl;
+        // set, even for a nonsense query — so these "top hits" are a best guess,
+        // not confirmed matches for the place. Callers must treat them as best-effort.
+        return payload.Images
+            .Select(i => i.ImageUrl)
+            .Where(url => !string.IsNullOrEmpty(url))
+            .Take(maxResults)
+            .Cast<string>()
+            .ToList();
     }
 
     private sealed record ImageSearchResponse(

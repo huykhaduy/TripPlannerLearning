@@ -1,11 +1,94 @@
 import { useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import axios from 'axios';
 import { getDestinationDetails } from '../../api/destinations';
 import { AddToTripButton } from './AddToTripButton';
 import { Card } from '../../components/Card';
 import { NearbyAttractions } from './NearbyAttractions';
 import type { DestinationDetails } from '../../types';
+
+// A small bounding box around the point (~1.1km) keeps the embedded pin at a
+// readable street-level zoom without needing a map API key.
+const MAP_BBOX_DELTA = 0.01;
+
+function buildOsmEmbedUrl(latitude: number, longitude: number): string {
+  const bbox = [longitude - MAP_BBOX_DELTA, latitude - MAP_BBOX_DELTA, longitude + MAP_BBOX_DELTA, latitude + MAP_BBOX_DELTA].join(',');
+  return `https://www.openstreetmap.org/export/embed.html?bbox=${encodeURIComponent(bbox)}&layer=mapnik&marker=${latitude}%2C${longitude}`;
+}
+
+function buildOsmViewUrl(latitude: number, longitude: number): string {
+  return `https://www.openstreetmap.org/?mlat=${latitude}&mlon=${longitude}#map=17/${latitude}/${longitude}`;
+}
+
+/**
+ * F2/US2 — the details view's photo gallery. A broken image is dropped from
+ * the carousel entirely (rather than shown as a broken-image icon); the
+ * emoji placeholder only appears once every photo has failed or none exist.
+ */
+function PhotoCarousel({ images, name }: { images: string[]; name: string }) {
+  const [items, setItems] = useState(images);
+  const [index, setIndex] = useState(0);
+
+  useEffect(() => {
+    setItems(images);
+    setIndex(0);
+  }, [images]);
+
+  function dropFailed(url: string) {
+    setItems((prev) => {
+      const next = prev.filter((u) => u !== url);
+      setIndex((i) => Math.min(i, Math.max(next.length - 1, 0)));
+      return next;
+    });
+  }
+
+  if (items.length === 0) {
+    return <div className="flex h-full w-full items-center justify-center bg-slate-100 text-6xl">🏛️</div>;
+  }
+
+  return (
+    <>
+      <img
+        key={items[index]}
+        src={items[index]}
+        alt={items.length > 1 ? `${name} — photo ${index + 1} of ${items.length}` : name}
+        onError={() => dropFailed(items[index])}
+        className="h-full w-full object-cover"
+      />
+      {items.length > 1 && (
+        <>
+          <button
+            type="button"
+            aria-label="Previous photo"
+            onClick={() => setIndex((i) => (i - 1 + items.length) % items.length)}
+            className="absolute left-3 top-1/2 z-10 -translate-y-1/2 rounded-full bg-black/40 px-3 py-1.5 text-white hover:bg-black/60"
+          >
+            ‹
+          </button>
+          <button
+            type="button"
+            aria-label="Next photo"
+            onClick={() => setIndex((i) => (i + 1) % items.length)}
+            className="absolute right-3 top-1/2 z-10 -translate-y-1/2 rounded-full bg-black/40 px-3 py-1.5 text-white hover:bg-black/60"
+          >
+            ›
+          </button>
+          <div className="absolute top-3 left-1/2 z-10 flex -translate-x-1/2 gap-1.5">
+            {items.map((url, i) => (
+              <button
+                key={url}
+                type="button"
+                aria-label={`Show photo ${i + 1} of ${items.length}`}
+                onClick={() => setIndex(i)}
+                className={`h-1.5 w-1.5 rounded-full ${i === index ? 'bg-white' : 'bg-white/40'}`}
+              />
+            ))}
+          </div>
+        </>
+      )}
+    </>
+  );
+}
 
 /**
  * F2/US1, US2 & US4 — full destination details, opened from a card in the
@@ -14,10 +97,22 @@ import type { DestinationDetails } from '../../types';
  */
 export function DestinationDetailsPage() {
   const { providerId } = useParams<{ providerId: string }>();
+  const navigate = useNavigate();
+  // location.key === 'default' means this tab has no prior in-app history
+  // (e.g. this page was loaded/refreshed directly) — navigate(-1) would be a
+  // no-op then, so fall back to "/" instead of going nowhere.
+  const location = useLocation();
+
+  function backToSearch() {
+    if (location.key === 'default') {
+      navigate('/');
+    } else {
+      navigate(-1);
+    }
+  }
 
   const [details, setDetails] = useState<DestinationDetails | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [imageFailed, setImageFailed] = useState(false);
 
   useEffect(() => {
     if (!providerId) return;
@@ -25,7 +120,6 @@ export function DestinationDetailsPage() {
     let ignore = false;
     setDetails(null);
     setError(null);
-    setImageFailed(false);
     getDestinationDetails(providerId)
       .then((result) => {
         if (!ignore) setDetails(result);
@@ -45,9 +139,9 @@ export function DestinationDetailsPage() {
     return (
       <Card className="mx-auto max-w-2xl">
         <p className="text-sm text-red-600">{error}</p>
-        <Link to="/" className="mt-2 inline-block text-sm text-brand-600 hover:underline">
+        <button type="button" onClick={backToSearch} className="mt-2 inline-block text-sm text-brand-600 hover:underline">
           ← Back to search
-        </Link>
+        </button>
       </Card>
     );
   }
@@ -60,27 +154,22 @@ export function DestinationDetailsPage() {
     );
   }
 
-  const showImage = details.imageUrl && !imageFailed;
+  // The backend always keeps imageUrl in sync as imageUrls[0] (or both empty),
+  // so imageUrls alone is a complete gallery — no separate imageUrl fallback needed.
+  const heroImages = details.imageUrls;
+
+  const hasNearby = details.latitude != null && details.longitude != null;
 
   return (
     <div className="mx-auto max-w-5xl">
-      <Link to="/" className="text-sm text-brand-600 hover:underline">
+      <button type="button" onClick={backToSearch} className="text-sm text-brand-600 hover:underline">
         ← Back to search
-      </Link>
+      </button>
 
       <div className="relative mt-3 h-80 w-full overflow-hidden rounded-2xl sm:h-96">
-        {showImage ? (
-          <img
-            src={details.imageUrl!}
-            alt={details.name}
-            onError={() => setImageFailed(true)}
-            className="h-full w-full object-cover"
-          />
-        ) : (
-          <div className="flex h-full w-full items-center justify-center bg-slate-100 text-6xl">🏛️</div>
-        )}
-        <div className="absolute inset-0 flex flex-col justify-end bg-gradient-to-t from-black/70 via-black/10 to-transparent p-6 text-white">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <PhotoCarousel images={heroImages} name={details.name} />
+        <div className="pointer-events-none absolute inset-0 flex flex-col justify-end bg-gradient-to-t from-black/70 via-black/10 to-transparent p-6 text-white">
+          <div className="pointer-events-auto flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
             <div>
               {details.category && (
                 <span className="inline-block rounded-full bg-brand-600 px-3 py-1 text-xs font-semibold">
@@ -104,10 +193,14 @@ export function DestinationDetailsPage() {
         </div>
       </div>
 
-      <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
-        <div className="lg:col-span-2">{details.description && <p className="text-slate-700">{details.description}</p>}</div>
+      {details.description && <p className="mt-6 text-slate-700">{details.description}</p>}
 
-        <Card padding="tight" className="h-fit">
+      <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
+        {/* lg:only:col-span-2 — if NearbyAttractions doesn't render (no other
+            POIs nearby, or no coordinates at all), this card is the grid's
+            only child and should fill the row instead of sitting alone at
+            half-width with dead space beside it. */}
+        <Card padding="tight" className="h-fit lg:only:col-span-2">
           <h2 className="font-headline text-base font-semibold text-brand-600">Practical info</h2>
           <dl className="mt-3 flex flex-col gap-3 text-sm">
             <div>
@@ -129,18 +222,37 @@ export function DestinationDetailsPage() {
               </div>
             )}
           </dl>
-        </Card>
-      </div>
 
-      {details.latitude != null && details.longitude != null && (
-        <div className="mt-8">
+          {hasNearby && (
+            <div className="mt-4">
+              <div className="overflow-hidden rounded-lg border border-[#E2E8F0]">
+                <iframe
+                  title={`Map showing ${details.name}`}
+                  src={buildOsmEmbedUrl(details.latitude!, details.longitude!)}
+                  loading="lazy"
+                  className="h-48 w-full border-0"
+                />
+              </div>
+              <a
+                href={buildOsmViewUrl(details.latitude!, details.longitude!)}
+                target="_blank"
+                rel="noreferrer"
+                className="mt-1.5 inline-block text-xs text-brand-600 hover:underline"
+              >
+                View larger map
+              </a>
+            </div>
+          )}
+        </Card>
+
+        {hasNearby && (
           <NearbyAttractions
-            latitude={details.latitude}
-            longitude={details.longitude}
+            latitude={details.latitude!}
+            longitude={details.longitude!}
             excludeProviderId={details.providerId}
           />
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }

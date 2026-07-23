@@ -37,5 +37,8 @@ public static class DestinationMappings
         Longitude: destination.Longitude,
         Address: destination.Address,
         Website: destination.Website,
-        OpeningHours: destination.OpeningHours);
+        OpeningHours: destination.OpeningHours,
+        // The cache row only ever stores one photo — no Serper re-query for a
+        // saved-trip destination the provider no longer knows about.
+        ImageUrls: destination.ImageUrl is not null ? [destination.ImageUrl] : []);
 }

@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useMemo } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../auth/AuthContext';
 import { CitySearchInput } from './CitySearchInput';
 import { AttractionsList } from './AttractionsList';
@@ -12,7 +12,32 @@ import type { LocationSuggestion } from '../../types';
  */
 export function SearchPage() {
   const { isAuthenticated } = useAuth();
-  const [selectedCity, setSelectedCity] = useState<LocationSuggestion | null>(null);
+  // The selected city lives in the URL (not useState) so it survives a page
+  // refresh and the "back" navigation from the destination details page.
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  const selectedCity = useMemo<LocationSuggestion | null>(() => {
+    const name = searchParams.get('city');
+    const rawLat = searchParams.get('lat');
+    const rawLng = searchParams.get('lng');
+    // Check presence before converting — Number(null) is 0, a valid finite
+    // number, so a truncated URL missing lat/lng would otherwise silently
+    // resolve to Null Island (0, 0) instead of "no city selected".
+    if (!name || rawLat === null || rawLng === null) return null;
+    const latitude = Number(rawLat);
+    const longitude = Number(rawLng);
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+    return { name, country: searchParams.get('country'), latitude, longitude };
+  }, [searchParams]);
+
+  function handleSelect(city: LocationSuggestion) {
+    setSearchParams({
+      city: city.name,
+      ...(city.country ? { country: city.country } : {}),
+      lat: String(city.latitude),
+      lng: String(city.longitude),
+    });
+  }
 
   return (
     <div className="flex flex-col gap-8">
@@ -20,7 +45,7 @@ export function SearchPage() {
         <h1 className="font-headline text-4xl font-bold tracking-tight text-white sm:text-5xl">Where to next?</h1>
         <p className="mt-3 text-brand-100">Search a city to see its recommended attractions.</p>
         <div className="mx-auto mt-6 max-w-xl">
-          <CitySearchInput onSelect={setSelectedCity} />
+          <CitySearchInput onSelect={handleSelect} initialCity={selectedCity} />
         </div>
       </div>
 

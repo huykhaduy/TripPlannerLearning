@@ -35,6 +35,9 @@ public class DestinationService : IDestinationService
     // per-query API) all at once.
     private const int ImageFetchConcurrency = 5;
 
+    // F2/US2 — how many photos the details view's carousel gets per place.
+    private const int DetailsPhotoCount = 5;
+
     // How long a resolved (or "nothing found") image is cached per place, so
     // a paid Serper query is never repeated for the same attraction.
     private static readonly TimeSpan ImageTtl = TimeSpan.FromHours(24);
@@ -203,43 +206,65 @@ public class DestinationService : IDestinationService
 
     /// <summary>
     /// Serper (Google Images) first, since it finds a photo for far more places
-    /// than the destination provider's own sparse image data; falls back to the
-    /// provider's (Wikimedia-sourced) details image, then to whatever image the
-    /// attraction already carried from the list call itself, and finally to a
-    /// stale cached image rather than blanking out a thumbnail that used to
-    /// have one. In practice Serper rarely returns a truly empty result, even
-    /// for an unrelated query, so a non-null hit is a best-effort "top hit",
-    /// not a confirmed match — the later fallbacks mostly only fire when
-    /// Serper itself is unreachable or times out.
+    /// than the destination provider's own sparse image data; falls back to
+    /// whatever image the caller already had on hand (the provider's own
+    /// thumbnail), and finally to a stale cached gallery rather than blanking
+    /// out photos that used to be there. In practice Serper rarely returns a
+    /// truly empty result, even for an unrelated query, so a non-null hit is a
+    /// best-effort "top hit", not a confirmed match — the later fallbacks
+    /// mostly only fire when Serper itself is unreachable or times out.
+    ///
+    /// Shared by the attractions list (which only needs the first photo, via
+    /// <see cref="GetAttractionImageAsync"/>) and the details view's carousel
+    /// (up to <see cref="DetailsPhotoCount"/>) under ONE cache entry per place —
+    /// otherwise the two would independently query and cache different "top
+    /// hits" for the same destination, showing a different photo on the list
+    /// than on its own details page.
     /// </summary>
-    private async Task<string?> GetAttractionImageAsync(DestinationSummaryDto attraction, CancellationToken cancellationToken)
+    private async Task<IReadOnlyList<string>> GetAttractionImagesAsync(string providerId, string name, string? providerImage, CancellationToken cancellationToken)
     {
-        var key = $"img:{attraction.ProviderId}";
-        var stale = _cache.TryGetValue(key, out CacheEnvelope<string?>? envelope) ? envelope : null;
+        var key = $"imgs:{providerId}";
+        var stale = _cache.TryGetValue(key, out CacheEnvelope<IReadOnlyList<string>>? envelope) ? envelope : null;
         if (stale is not null && _clock.GetUtcNow() - stale.FetchedAt < ImageTtl)
         {
             return stale.Value;
         }
 
-        string? image = null;
+        IReadOnlyList<string> images = [];
         try
         {
-            image = await _imageSearch.SearchImageAsync(attraction.Name, cancellationToken);
+            images = await _imageSearch.SearchImagesAsync(name, DetailsPhotoCount, cancellationToken);
         }
         catch (Exception ex) when (IsTransientExternalFailure(ex) && !cancellationToken.IsCancellationRequested)
         {
             // Serper down, timed out, or returned something unparseable — fall
-            // through to the next source rather than failing the whole list.
+            // through to the next source rather than failing the whole list/page.
         }
 
-        // GetCachedProviderDetailsAsync already absorbs its own transient
-        // failures (see its catch clause) and returns null rather than throwing.
-        image ??= (await GetCachedProviderDetailsAsync(attraction.ProviderId, cancellationToken))?.ImageUrl;
-        image ??= attraction.ImageUrl; // last resort: whatever the list call itself already had
-        image ??= stale?.Value; // nothing resolved this round — prefer a stale image over none at all
+        if (images.Count == 0 && providerImage is not null)
+        {
+            images = [providerImage];
+        }
 
-        _cache.Set(key, new CacheEnvelope<string?>(image, _clock.GetUtcNow()), CacheRetention);
-        return image;
+        if (images.Count == 0 && stale is not null)
+        {
+            images = stale.Value; // nothing resolved this round — prefer a stale gallery over none at all
+        }
+
+        _cache.Set(key, new CacheEnvelope<IReadOnlyList<string>>(images, _clock.GetUtcNow()), CacheRetention);
+        return images;
+    }
+
+    /// <summary>
+    /// Single-photo view over <see cref="GetAttractionImagesAsync"/> for the
+    /// attractions list, which only needs a thumbnail — shares its cache so a
+    /// place already looked up on the list (or its details page) isn't queried
+    /// twice.
+    /// </summary>
+    private async Task<string?> GetAttractionImageAsync(DestinationSummaryDto attraction, CancellationToken cancellationToken)
+    {
+        var images = await GetAttractionImagesAsync(attraction.ProviderId, attraction.Name, attraction.ImageUrl, cancellationToken);
+        return images.FirstOrDefault();
     }
 
     /// <summary>
@@ -301,7 +326,14 @@ public class DestinationService : IDestinationService
         var details = await GetCachedProviderDetailsAsync(providerId, cancellationToken);
         if (details is not null)
         {
-            return details;
+            // Geoapify's own image data is sparse (see EnrichWithImagesAsync) — the
+            // attractions list already papers over that with a Serper lookup, and
+            // F2/US2 wants a full photo gallery here, not just one thumbnail.
+            // GetAttractionImagesAsync already falls back to details.ImageUrl
+            // internally when Serper finds nothing, so images.FirstOrDefault()
+            // is never actually behind details.ImageUrl here.
+            var images = await GetAttractionImagesAsync(details.ProviderId, details.Name, details.ImageUrl, cancellationToken);
+            return details with { ImageUrl = images.FirstOrDefault(), ImageUrls = images };
         }
 
         // Saved-trip destinations must stay viewable even if the provider forgets
