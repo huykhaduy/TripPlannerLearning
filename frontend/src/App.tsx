@@ -4,12 +4,14 @@ import { useAuth } from './auth/AuthContext';
 import { ProtectedRoute } from './auth/ProtectedRoute';
 import { LoginPage } from './features/auth/LoginPage';
 import { RegisterPage } from './features/auth/RegisterPage';
+import { VerifyEmailPage } from './features/auth/VerifyEmailPage';
 import { SearchPage } from './features/destinations/SearchPage';
 import { DestinationDetailsPage } from './features/destinations/DestinationDetailsPage';
 import { TripsPage } from './features/trips/TripsPage';
 import { TripDetailPage } from './features/trips/TripDetailPage';
 import { Avatar } from './components/Avatar';
 import { Button } from './components/Button';
+import { EmailVerificationBanner } from './components/EmailVerificationBanner';
 
 const navLinkClass = ({ isActive }: { isActive: boolean }) =>
   isActive
@@ -86,12 +88,15 @@ export default function App() {
         </div>
       </nav>
 
+      <EmailVerificationBanner />
+
       <main className="mx-auto max-w-[1280px] px-4 py-8 sm:px-12">
         <Routes>
           <Route path="/" element={<SearchPage />} />
           <Route path="/destinations/:providerId" element={<DestinationDetailsPage />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
+          <Route path="/verify-email" element={<VerifyEmailPage />} />
 
           {/* Authenticated area (Feature 3). */}
           <Route element={<ProtectedRoute />}>

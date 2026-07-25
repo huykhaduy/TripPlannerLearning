@@ -11,6 +11,10 @@ interface AuthContextValue {
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, password: string, displayName?: string) => Promise<void>;
   logout: () => void;
+  // F4/US2 — reflects a just-completed verification immediately (e.g. the
+  // user opened the link in the same browser tab they registered from)
+  // without requiring them to log in again.
+  markEmailVerified: () => void;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -58,6 +62,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         persistSession(res.accessToken, res.user);
       },
       logout: clearSession,
+      markEmailVerified() {
+        setUser((current) => {
+          if (!current || current.isEmailVerified) return current;
+          const next = { ...current, isEmailVerified: true };
+          localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(next));
+          return next;
+        });
+      },
     }),
     [user],
   );

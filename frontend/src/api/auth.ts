@@ -20,3 +20,13 @@ export async function login(email: string, password: string): Promise<AuthRespon
   const { data } = await apiClient.post<AuthResponse>('/auth/login', { email, password });
   return data;
 }
+
+/** F4/US2 — verify the email behind a registration via the emailed link's token. */
+export async function verifyEmail(token: string): Promise<void> {
+  await apiClient.post('/auth/verify-email', { token });
+}
+
+/** F4/US2 — re-send the verification email for the current (logged-in) user. */
+export async function resendVerificationEmail(): Promise<void> {
+  await apiClient.post('/auth/resend-verification');
+}

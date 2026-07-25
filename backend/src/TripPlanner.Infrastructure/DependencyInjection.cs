@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using TripPlanner.Application.Common.Interfaces;
+using TripPlanner.Infrastructure.Email;
 using TripPlanner.Infrastructure.ExternalApis;
 using TripPlanner.Infrastructure.Identity;
 using TripPlanner.Infrastructure.Persistence;
@@ -24,6 +25,11 @@ public static class DependencyInjection
         // Security primitives.
         services.AddScoped<IPasswordHasher, BCryptPasswordHasher>();
         services.AddScoped<IJwtTokenGenerator, JwtTokenGenerator>();
+        services.AddSingleton<IAppUrlProvider, AppUrlProvider>();
+
+        // Email (F4/US2 verification link) — Gmail SMTP relay.
+        services.Configure<SmtpSettings>(configuration.GetSection(SmtpSettings.SectionName));
+        services.AddScoped<IEmailSender, SmtpEmailSender>();
 
         // In-memory cache for browse-path provider results (spec §11.2 NFR1/NFR2).
         services.AddMemoryCache();

@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using TripPlanner.Application.Features.Auth;
 using TripPlanner.Application.Features.Auth.Dtos;
@@ -39,5 +40,26 @@ public class AuthController : ControllerBase
     {
         var response = await _authService.LoginAsync(request, cancellationToken);
         return Ok(response);
+    }
+
+    /// <summary>F4/US2 — verify the email behind a registration via the emailed link's token.</summary>
+    [HttpPost("verify-email")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> VerifyEmail(VerifyEmailRequest request, CancellationToken cancellationToken)
+    {
+        await _authService.VerifyEmailAsync(request.Token, cancellationToken);
+        return Ok();
+    }
+
+    /// <summary>F4/US2 — re-send the verification email for the current user.</summary>
+    [Authorize]
+    [HttpPost("resend-verification")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<IActionResult> ResendVerification(CancellationToken cancellationToken)
+    {
+        await _authService.ResendVerificationEmailAsync(cancellationToken);
+        return Ok();
     }
 }

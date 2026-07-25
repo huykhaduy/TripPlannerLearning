@@ -4,6 +4,7 @@ export interface User {
   id: string;
   email: string;
   displayName?: string | null;
+  isEmailVerified: boolean;
 }
 
 export interface AuthResponse {

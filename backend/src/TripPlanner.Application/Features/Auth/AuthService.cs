@@ -1,3 +1,5 @@
+using System.Net.Mail;
+using System.Net.Sockets;
 using FluentValidation;
 using Microsoft.EntityFrameworkCore;
 using TripPlanner.Application.Common.Exceptions;
@@ -5,6 +7,7 @@ using TripPlanner.Application.Common.Interfaces;
 using TripPlanner.Application.Common.Validation;
 using TripPlanner.Application.Features.Auth.Dtos;
 using TripPlanner.Domain.Entities;
+using ValidationException = TripPlanner.Application.Common.Exceptions.ValidationException;
 
 namespace TripPlanner.Application.Features.Auth;
 
@@ -28,17 +31,26 @@ public class AuthService : IAuthService
     private readonly IApplicationDbContext _db;
     private readonly IPasswordHasher _passwordHasher;
     private readonly IJwtTokenGenerator _tokenGenerator;
+    private readonly IEmailSender _emailSender;
+    private readonly IAppUrlProvider _appUrls;
+    private readonly ICurrentUserService _currentUser;
     private readonly IValidator<RegisterRequest> _registerValidator;
 
     public AuthService(
         IApplicationDbContext db,
         IPasswordHasher passwordHasher,
         IJwtTokenGenerator tokenGenerator,
+        IEmailSender emailSender,
+        IAppUrlProvider appUrls,
+        ICurrentUserService currentUser,
         IValidator<RegisterRequest> registerValidator)
     {
         _db = db;
         _passwordHasher = passwordHasher;
         _tokenGenerator = tokenGenerator;
+        _emailSender = emailSender;
+        _appUrls = appUrls;
+        _currentUser = currentUser;
         _registerValidator = registerValidator;
     }
 
@@ -64,14 +76,76 @@ public class AuthService : IAuthService
             Email = email,
             PasswordHash = _passwordHasher.Hash(request.Password),
             DisplayName = string.IsNullOrWhiteSpace(request.DisplayName) ? null : request.DisplayName.Trim(),
-            IsEmailVerified = true, // Template simplification; real flow is left as an exercise (US2).
+            IsEmailVerified = false, // F4/US2 — flipped by VerifyEmailAsync once the emailed link is opened.
         };
 
         _db.Users.Add(user);
         await _db.SaveChangesAsync(cancellationToken);
 
+        // Registration still succeeds even if the email itself can't be sent
+        // (SMTP down/misconfigured) — the user can retry via "resend
+        // verification email"; a mail outage shouldn't block sign-up.
+        await SendVerificationEmailAsync(user, cancellationToken);
+
         return BuildAuthResponse(user);
     }
+
+    public async Task VerifyEmailAsync(string token, CancellationToken cancellationToken = default)
+    {
+        var userId = _tokenGenerator.ValidateEmailVerificationToken(token)
+            ?? throw new ValidationException("This verification link is invalid or has expired.");
+
+        var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId, cancellationToken)
+            ?? throw new NotFoundException(nameof(User), userId);
+
+        if (!user.IsEmailVerified)
+        {
+            user.IsEmailVerified = true;
+            await _db.SaveChangesAsync(cancellationToken);
+        }
+    }
+
+    public async Task ResendVerificationEmailAsync(CancellationToken cancellationToken = default)
+    {
+        var userId = _currentUser.GetRequiredUserId();
+
+        var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId, cancellationToken)
+            ?? throw new NotFoundException(nameof(User), userId);
+
+        if (user.IsEmailVerified)
+        {
+            return; // nothing to resend
+        }
+
+        await SendVerificationEmailAsync(user, cancellationToken);
+    }
+
+    private async Task SendVerificationEmailAsync(User user, CancellationToken cancellationToken)
+    {
+        var token = _tokenGenerator.GenerateEmailVerificationToken(user);
+        var link = $"{_appUrls.FrontendBaseUrl}/verify-email?token={Uri.EscapeDataString(token)}";
+        var greetingName = user.DisplayName is null ? "" : $" {user.DisplayName}";
+
+        try
+        {
+            await _emailSender.SendAsync(
+                user.Email,
+                "Verify your TripPlanner email",
+                $"<p>Hi{greetingName},</p>"
+                    + "<p>Click below to verify your email and activate your account:</p>"
+                    + $"<p><a href=\"{link}\">{link}</a></p>"
+                    + "<p>This link expires in 24 hours.</p>",
+                cancellationToken);
+        }
+        catch (Exception ex) when (IsTransientEmailFailure(ex) && !cancellationToken.IsCancellationRequested)
+        {
+            // SMTP down, misconfigured, or the recipient was rejected — the
+            // account still exists; resending is a separate, retryable step.
+        }
+    }
+
+    private static bool IsTransientEmailFailure(Exception ex) =>
+        ex is SmtpException or SocketException; // SmtpFailedRecipientException derives from SmtpException
 
     public async Task<AuthResponse> LoginAsync(LoginRequest request, CancellationToken cancellationToken = default)
     {

@@ -7,7 +7,10 @@ public record RegisterRequest(string Email, string Password, string? DisplayName
 public record LoginRequest(string Email, string Password);
 
 /// <summary>The signed-in user as returned to the client (never includes the hash).</summary>
-public record UserDto(Guid Id, string Email, string? DisplayName);
+public record UserDto(Guid Id, string Email, string? DisplayName, bool IsEmailVerified);
+
+/// <summary>Feature 4 / US2 — verify the email address behind a registration.</summary>
+public record VerifyEmailRequest(string Token);
 
 /// <summary>Returned by register/login — the JWT plus the user it belongs to.</summary>
 public record AuthResponse(string AccessToken, DateTimeOffset ExpiresAt, UserDto User);

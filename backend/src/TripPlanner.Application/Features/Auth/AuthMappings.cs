@@ -11,5 +11,5 @@ namespace TripPlanner.Application.Features.Auth;
 public static class AuthMappings
 {
     public static UserDto ToDto(this User user) =>
-        new(user.Id, user.Email, user.DisplayName);
+        new(user.Id, user.Email, user.DisplayName, user.IsEmailVerified);
 }
