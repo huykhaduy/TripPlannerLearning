@@ -1,7 +1,6 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
 using FluentValidation;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using TripPlanner.Application.Common.Exceptions;
 using TripPlanner.Application.Common.Interfaces;
@@ -52,7 +51,7 @@ public class DestinationService : IDestinationService
     // retention window bounds memory growth.
     private static readonly TimeSpan CacheRetention = TimeSpan.FromDays(7);
 
-    private readonly IApplicationDbContext _db;
+    private readonly IDestinationRepository _destinations;
     private readonly IDestinationProvider _provider;
     private readonly IImageSearchProvider _imageSearch;
     private readonly IMemoryCache _cache;
@@ -62,7 +61,7 @@ public class DestinationService : IDestinationService
     private readonly IValidator<GetDestinationDetailsRequest> _detailsValidator;
 
     public DestinationService(
-        IApplicationDbContext db,
+        IDestinationRepository destinations,
         IDestinationProvider provider,
         IImageSearchProvider imageSearch,
         IMemoryCache cache,
@@ -71,7 +70,7 @@ public class DestinationService : IDestinationService
         IValidator<GetAttractionsRequest> attractionsValidator,
         IValidator<GetDestinationDetailsRequest> detailsValidator)
     {
-        _db = db;
+        _destinations = destinations;
         _provider = provider;
         _imageSearch = imageSearch;
         _cache = cache;
@@ -338,9 +337,7 @@ public class DestinationService : IDestinationService
 
         // Saved-trip destinations must stay viewable even if the provider forgets
         // them (§8.4's snapshot rationale) — only a miss on BOTH sources is 404.
-        var cached = await _db.Destinations
-            .AsNoTracking()
-            .FirstOrDefaultAsync(d => d.ProviderId == providerId, cancellationToken);
+        var cached = await _destinations.GetByProviderIdReadOnlyAsync(providerId, cancellationToken);
 
         return cached?.ToDetailsDto() ?? throw new NotFoundException(nameof(Destination), providerId);
     }

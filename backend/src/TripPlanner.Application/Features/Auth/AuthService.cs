@@ -1,7 +1,6 @@
 using System.Net.Mail;
 using System.Net.Sockets;
 using FluentValidation;
-using Microsoft.EntityFrameworkCore;
 using TripPlanner.Application.Common.Exceptions;
 using TripPlanner.Application.Common.Interfaces;
 using TripPlanner.Application.Common.Validation;
@@ -18,8 +17,9 @@ namespace TripPlanner.Application.Features.Auth;
 /// This is the one feature slice that is fully built out. It demonstrates the
 /// shape every other use-case in this project should follow:
 ///
-///   * depend on INTERFACES from the Application layer (IApplicationDbContext,
-///     IPasswordHasher, IJwtTokenGenerator) — never on EF/Infrastructure types;
+///   * depend on INTERFACES from the Application layer (IUserRepository,
+///     IUnitOfWork, IPasswordHasher, IJwtTokenGenerator) — never on
+///     EF/Infrastructure types;
 ///   * validate input and enforce business rules, throwing the Application
 ///     exceptions (Validation/Conflict/Unauthorized) that the API maps to HTTP;
 ///   * map entities to DTOs so we never leak the password hash to the client.
@@ -28,7 +28,8 @@ namespace TripPlanner.Application.Features.Auth;
 /// </summary>
 public class AuthService : IAuthService
 {
-    private readonly IApplicationDbContext _db;
+    private readonly IUserRepository _users;
+    private readonly IUnitOfWork _unitOfWork;
     private readonly IPasswordHasher _passwordHasher;
     private readonly IJwtTokenGenerator _tokenGenerator;
     private readonly IEmailSender _emailSender;
@@ -37,7 +38,8 @@ public class AuthService : IAuthService
     private readonly IValidator<RegisterRequest> _registerValidator;
 
     public AuthService(
-        IApplicationDbContext db,
+        IUserRepository users,
+        IUnitOfWork unitOfWork,
         IPasswordHasher passwordHasher,
         IJwtTokenGenerator tokenGenerator,
         IEmailSender emailSender,
@@ -45,7 +47,8 @@ public class AuthService : IAuthService
         ICurrentUserService currentUser,
         IValidator<RegisterRequest> registerValidator)
     {
-        _db = db;
+        _users = users;
+        _unitOfWork = unitOfWork;
         _passwordHasher = passwordHasher;
         _tokenGenerator = tokenGenerator;
         _emailSender = emailSender;
@@ -63,7 +66,7 @@ public class AuthService : IAuthService
         var email = NormalizeEmail(request.Email);
 
         // Business rule: email must be unique.
-        var emailTaken = await _db.Users.AnyAsync(u => u.Email == email, cancellationToken);
+        var emailTaken = await _users.ExistsByEmailAsync(email, cancellationToken);
         if (emailTaken)
         {
             // Generic message — do not reveal whether the email exists (avoids
@@ -79,8 +82,8 @@ public class AuthService : IAuthService
             IsEmailVerified = false, // F4/US2 — flipped by VerifyEmailAsync once the emailed link is opened.
         };
 
-        _db.Users.Add(user);
-        await _db.SaveChangesAsync(cancellationToken);
+        _users.Add(user);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         // Registration still succeeds even if the email itself can't be sent
         // (SMTP down/misconfigured) — the user can retry via "resend
@@ -95,13 +98,13 @@ public class AuthService : IAuthService
         var userId = _tokenGenerator.ValidateEmailVerificationToken(token)
             ?? throw new ValidationException("This verification link is invalid or has expired.");
 
-        var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId, cancellationToken)
+        var user = await _users.GetByIdAsync(userId, cancellationToken)
             ?? throw new NotFoundException(nameof(User), userId);
 
         if (!user.IsEmailVerified)
         {
             user.IsEmailVerified = true;
-            await _db.SaveChangesAsync(cancellationToken);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
         }
     }
 
@@ -109,7 +112,7 @@ public class AuthService : IAuthService
     {
         var userId = _currentUser.GetRequiredUserId();
 
-        var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId, cancellationToken)
+        var user = await _users.GetByIdAsync(userId, cancellationToken)
             ?? throw new NotFoundException(nameof(User), userId);
 
         if (user.IsEmailVerified)
@@ -151,7 +154,7 @@ public class AuthService : IAuthService
     {
         var email = NormalizeEmail(request.Email);
 
-        var user = await _db.Users.FirstOrDefaultAsync(u => u.Email == email, cancellationToken);
+        var user = await _users.GetByEmailAsync(email, cancellationToken);
 
         // Verify even when the user is missing? We short-circuit here for clarity.
         // The error is deliberately the same for "no such user" and "wrong password".

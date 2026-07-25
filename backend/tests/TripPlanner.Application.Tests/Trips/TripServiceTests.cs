@@ -7,6 +7,7 @@ using TripPlanner.Application.Features.Trips;
 using TripPlanner.Application.Features.Trips.Dtos;
 using TripPlanner.Application.Features.Trips.Validators;
 using TripPlanner.Infrastructure.Persistence;
+using TripPlanner.Infrastructure.Persistence.Repositories;
 using Xunit;
 
 namespace TripPlanner.Application.Tests.Trips;
@@ -35,7 +36,14 @@ public class TripServiceTests
         var currentUser = new Mock<ICurrentUserService>();
         currentUser.Setup(c => c.UserId).Returns(userId);
 
-        return new TripService(db, currentUser.Object, provider ?? Mock.Of<IDestinationProvider>(),
+        return new TripService(
+            new TripRepository(db),
+            new Repository<Domain.Entities.ItineraryDay>(db),
+            new Repository<Domain.Entities.ItineraryItem>(db),
+            new DestinationRepository(db),
+            new UnitOfWork(db),
+            currentUser.Object,
+            provider ?? Mock.Of<IDestinationProvider>(),
             (imageSearch ?? NoOpImageSearch()).Object,
             new CreateTripRequestValidator(), new UpdateTripRequestValidator(),
             new AddDestinationRequestValidator(), new UpdateItineraryItemRequestValidator());

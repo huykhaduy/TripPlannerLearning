@@ -8,6 +8,7 @@ using TripPlanner.Application.Features.Auth.Validators;
 using TripPlanner.Domain.Entities;
 using TripPlanner.Infrastructure.Identity;
 using TripPlanner.Infrastructure.Persistence;
+using TripPlanner.Infrastructure.Persistence.Repositories;
 using Xunit;
 
 namespace TripPlanner.Application.Tests.Auth;
@@ -28,6 +29,9 @@ public class AuthServiceTests
 
     private static AuthService CreateSut(ApplicationDbContext db, Guid? currentUserId = null, Mock<IEmailSender>? emailSender = null)
     {
+        var users = new UserRepository(db);
+        var unitOfWork = new UnitOfWork(db);
+
         // Real BCrypt hasher (cheap enough for tests); fake token generator.
         var hasher = new BCryptPasswordHasher();
 
@@ -57,7 +61,7 @@ public class AuthServiceTests
 
         // Real validator — it's pure logic, so mocking it would only hide bugs.
         return new AuthService(
-            db, hasher, tokenGenerator.Object, email.Object, appUrls.Object, currentUser.Object,
+            users, unitOfWork, hasher, tokenGenerator.Object, email.Object, appUrls.Object, currentUser.Object,
             new RegisterRequestValidator());
     }
 

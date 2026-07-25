@@ -1,17 +1,16 @@
 using Microsoft.EntityFrameworkCore;
-using TripPlanner.Application.Common.Interfaces;
 using TripPlanner.Domain.Common;
 using TripPlanner.Domain.Entities;
 
 namespace TripPlanner.Infrastructure.Persistence;
 
 /// <summary>
-/// The EF Core database context. Implements <see cref="IApplicationDbContext"/>
-/// so the Application layer can use it without referencing Infrastructure.
-/// Entity-to-table mapping lives in the *Configuration classes in this folder
-/// (applied via <see cref="ModelBuilder.ApplyConfigurationsFromAssembly"/>).
+/// The EF Core database context, used directly by the repository classes in
+/// this namespace (see Repositories/). Entity-to-table mapping lives in the
+/// *Configuration classes in this folder (applied via
+/// <see cref="ModelBuilder.ApplyConfigurationsFromAssembly"/>).
 /// </summary>
-public class ApplicationDbContext : DbContext, IApplicationDbContext
+public class ApplicationDbContext : DbContext
 {
     public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options)
         : base(options)

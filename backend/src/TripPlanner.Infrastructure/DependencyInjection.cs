@@ -6,6 +6,7 @@ using TripPlanner.Infrastructure.Email;
 using TripPlanner.Infrastructure.ExternalApis;
 using TripPlanner.Infrastructure.Identity;
 using TripPlanner.Infrastructure.Persistence;
+using TripPlanner.Infrastructure.Persistence.Repositories;
 
 namespace TripPlanner.Infrastructure;
 
@@ -75,7 +76,13 @@ public static class DependencyInjection
             }
         });
 
-        // Expose the context to the Application layer through its interface.
-        services.AddScoped<IApplicationDbContext>(sp => sp.GetRequiredService<ApplicationDbContext>());
+        // Generic repository + unit of work (open generic covers IRepository<ItineraryDay>,
+        // IRepository<ItineraryItem> directly; entity-specific repositories are
+        // registered individually as they're introduced in later tasks).
+        services.AddScoped(typeof(IRepository<>), typeof(Repository<>));
+        services.AddScoped<IUnitOfWork, UnitOfWork>();
+        services.AddScoped<IUserRepository, UserRepository>();
+        services.AddScoped<IDestinationRepository, DestinationRepository>();
+        services.AddScoped<ITripRepository, TripRepository>();
     }
 }

@@ -4,7 +4,7 @@
     APPLICATION LAYER
     Use cases / business workflows. Depends ONLY on the Domain layer.
     It defines INTERFACES (e.g. IPasswordHasher, IJwtTokenGenerator,
-    IApplicationDbContext) that the Infrastructure layer implements. This is the
+    IRepository&lt;T&gt;, IUnitOfWork) that the Infrastructure layer implements. This is the
     Dependency Inversion Principle in action — the inner layer owns the contract.
   -->
   <ItemGroup>
@@ -12,10 +12,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- EF Core abstractions only: lets us expose DbSet<T> via IApplicationDbContext.
-         The concrete DbContext lives in Infrastructure. -->
     <PackageReference Include="FluentValidation.DependencyInjectionExtensions" Version="12.1.1" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.9" />
+    <PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="10.0.9" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.9" />
   </ItemGroup>
 

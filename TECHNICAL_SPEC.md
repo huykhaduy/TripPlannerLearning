@@ -129,16 +129,20 @@ bind the request, call one service method, and wrap the result in `Ok(...)` /
 **[Observed]** Separation is real, not just cosmetic:
 
 - The Application layer consumes only interfaces it defines itself
-  (`IApplicationDbContext`, `IPasswordHasher`, `IJwtTokenGenerator`,
+  (`IRepository<T>`, `IUnitOfWork`, `IUserRepository`, `ITripRepository`,
+  `IDestinationRepository`, `IPasswordHasher`, `IJwtTokenGenerator`,
   `ICurrentUserService`, `IDestinationProvider`); implementations live in
   Infrastructure/WebApi and are bound in DI extension methods
   ([Application/DependencyInjection.cs](backend/src/TripPlanner.Application/DependencyInjection.cs),
   [Infrastructure/DependencyInjection.cs](backend/src/TripPlanner.Infrastructure/DependencyInjection.cs)).
-- One deliberate deviation from strict Clean Architecture: `IApplicationDbContext`
-  exposes EF Core `DbSet<T>` properties, so the Application layer takes a package
-  dependency on `Microsoft.EntityFrameworkCore`. The Application `.csproj` comment
-  acknowledges this explicitly ("EF Core abstractions only"). There is **no
-  repository pattern** — services query `DbSet`s directly. [Observed]
+- A generic `IRepository<T>` + `IUnitOfWork` pair, plus per-entity repository
+  interfaces for `User`, `Trip`, and `Destination` (see
+  [docs/superpowers/specs/2026-07-25-repository-pattern-design.md](docs/superpowers/specs/2026-07-25-repository-pattern-design.md)),
+  is the data-access layer services depend on. The Application layer takes no
+  package dependency on `Microsoft.EntityFrameworkCore` — a unique-index
+  violation surfaces from `IUnitOfWork.SaveChangesAsync` as the EF-agnostic
+  `ConcurrencyException`, which services catch and translate into a
+  feature-specific `ConflictException`. [Observed]
 
 ---
 

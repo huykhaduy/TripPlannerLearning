@@ -7,6 +7,7 @@ using TripPlanner.Application.Features.Destinations;
 using TripPlanner.Application.Features.Destinations.Dtos;
 using TripPlanner.Application.Features.Destinations.Validators;
 using TripPlanner.Infrastructure.Persistence;
+using TripPlanner.Infrastructure.Persistence.Repositories;
 using Xunit;
 
 namespace TripPlanner.Application.Tests.Destinations;
@@ -80,7 +81,7 @@ public class DestinationServiceTests
         Mock<IDestinationProvider> provider,
         FakeClock? clock = null,
         Mock<IImageSearchProvider>? imageSearch = null) =>
-        new(db, provider.Object, (imageSearch ?? NoOpImageSearch()).Object,
+        new(new DestinationRepository(db), provider.Object, (imageSearch ?? NoOpImageSearch()).Object,
             new MemoryCache(new MemoryCacheOptions()), clock ?? new FakeClock(),
             new SearchLocationsRequestValidator(), new GetAttractionsRequestValidator(),
             new GetDestinationDetailsRequestValidator());
