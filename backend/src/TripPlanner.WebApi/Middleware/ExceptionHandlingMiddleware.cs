@@ -41,6 +41,7 @@ public class ExceptionHandlingMiddleware
             ValidationException => (HttpStatusCode.BadRequest, "Validation failed"),
             DomainException => (HttpStatusCode.BadRequest, "Business rule violated"),
             UnauthorizedException => (HttpStatusCode.Unauthorized, "Authentication failed"),
+            ForbiddenException => (HttpStatusCode.Forbidden, "Forbidden"),
             NotFoundException => (HttpStatusCode.NotFound, "Resource not found"),
             ConflictException => (HttpStatusCode.Conflict, "Conflict"),
             NotImplementedException => (HttpStatusCode.NotImplemented, "Not implemented yet"),

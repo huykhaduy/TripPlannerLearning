@@ -11,7 +11,6 @@ import { TripsPage } from './features/trips/TripsPage';
 import { TripDetailPage } from './features/trips/TripDetailPage';
 import { Avatar } from './components/Avatar';
 import { Button } from './components/Button';
-import { EmailVerificationBanner } from './components/EmailVerificationBanner';
 
 const navLinkClass = ({ isActive }: { isActive: boolean }) =>
   isActive
@@ -87,8 +86,6 @@ export default function App() {
           )}
         </div>
       </nav>
-
-      <EmailVerificationBanner />
 
       <main className="mx-auto max-w-[1280px] px-4 py-8 sm:px-12">
         <Routes>

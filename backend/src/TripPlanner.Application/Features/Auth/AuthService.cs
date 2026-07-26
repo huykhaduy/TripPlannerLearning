@@ -34,8 +34,8 @@ public class AuthService : IAuthService
     private readonly IJwtTokenGenerator _tokenGenerator;
     private readonly IEmailSender _emailSender;
     private readonly IAppUrlProvider _appUrls;
-    private readonly ICurrentUserService _currentUser;
     private readonly IValidator<RegisterRequest> _registerValidator;
+    private readonly IValidator<ResendVerificationRequest> _resendValidator;
 
     public AuthService(
         IUserRepository users,
@@ -44,8 +44,8 @@ public class AuthService : IAuthService
         IJwtTokenGenerator tokenGenerator,
         IEmailSender emailSender,
         IAppUrlProvider appUrls,
-        ICurrentUserService currentUser,
-        IValidator<RegisterRequest> registerValidator)
+        IValidator<RegisterRequest> registerValidator,
+        IValidator<ResendVerificationRequest> resendValidator)
     {
         _users = users;
         _unitOfWork = unitOfWork;
@@ -53,11 +53,11 @@ public class AuthService : IAuthService
         _tokenGenerator = tokenGenerator;
         _emailSender = emailSender;
         _appUrls = appUrls;
-        _currentUser = currentUser;
         _registerValidator = registerValidator;
+        _resendValidator = resendValidator;
     }
 
-    public async Task<AuthResponse> RegisterAsync(RegisterRequest request, CancellationToken cancellationToken = default)
+    public async Task<UserDto> RegisterAsync(RegisterRequest request, CancellationToken cancellationToken = default)
     {
         // Input rules live in RegisterRequestValidator (Feature 4 / US1);
         // failures surface as our ValidationException -> HTTP 400.
@@ -90,7 +90,9 @@ public class AuthService : IAuthService
         // verification email"; a mail outage shouldn't block sign-up.
         await SendVerificationEmailAsync(user, cancellationToken);
 
-        return BuildAuthResponse(user);
+        // No JWT here — F4/US2 blocks login until the account is verified, so
+        // handing back a working session at registration would bypass that gate.
+        return user.ToDto();
     }
 
     public async Task VerifyEmailAsync(string token, CancellationToken cancellationToken = default)
@@ -108,16 +110,19 @@ public class AuthService : IAuthService
         }
     }
 
-    public async Task ResendVerificationEmailAsync(CancellationToken cancellationToken = default)
+    public async Task ResendVerificationEmailAsync(ResendVerificationRequest request, CancellationToken cancellationToken = default)
     {
-        var userId = _currentUser.GetRequiredUserId();
+        await _resendValidator.ValidateAndThrowAppExceptionAsync(request, cancellationToken);
 
-        var user = await _users.GetByIdAsync(userId, cancellationToken)
-            ?? throw new NotFoundException(nameof(User), userId);
+        var user = await _users.GetByEmailAsync(NormalizeEmail(request.Email), cancellationToken);
 
-        if (user.IsEmailVerified)
+        // Same outcome whether the email doesn't exist, is already verified, or
+        // is unverified — this is an anonymous endpoint (login now requires a
+        // verified email, so there's no session to resend from), and it must
+        // not leak which emails are registered.
+        if (user is null || user.IsEmailVerified)
         {
-            return; // nothing to resend
+            return;
         }
 
         await SendVerificationEmailAsync(user, cancellationToken);
@@ -161,6 +166,13 @@ public class AuthService : IAuthService
         if (user is null || !_passwordHasher.Verify(request.Password, user.PasswordHash))
         {
             throw new UnauthorizedException("Invalid email or password.");
+        }
+
+        // Only reveal "unverified" once the password is confirmed correct —
+        // otherwise this would leak account existence to a wrong-password guess.
+        if (!user.IsEmailVerified)
+        {
+            throw new ForbiddenException("Please verify your email before logging in.");
         }
 
         return BuildAuthResponse(user);

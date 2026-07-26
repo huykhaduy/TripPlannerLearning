@@ -12,5 +12,8 @@ public record UserDto(Guid Id, string Email, string? DisplayName, bool IsEmailVe
 /// <summary>Feature 4 / US2 — verify the email address behind a registration.</summary>
 public record VerifyEmailRequest(string Token);
 
+/// <summary>Feature 4 / US2 — request a fresh verification link for an unverified account.</summary>
+public record ResendVerificationRequest(string Email);
+
 /// <summary>Returned by register/login — the JWT plus the user it belongs to.</summary>
 public record AuthResponse(string AccessToken, DateTimeOffset ExpiresAt, UserDto User);

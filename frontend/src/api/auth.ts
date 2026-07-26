@@ -1,14 +1,15 @@
 import { apiClient } from './client';
-import type { AuthResponse } from '../types';
+import type { AuthResponse, User } from '../types';
 
 // Calls to the reference Auth endpoints (Feature 4).
 
+/** F4/US1 — creates the account and sends a verification email. Does NOT log the user in (F4/US2). */
 export async function register(
   email: string,
   password: string,
   displayName?: string,
-): Promise<AuthResponse> {
-  const { data } = await apiClient.post<AuthResponse>('/auth/register', {
+): Promise<User> {
+  const { data } = await apiClient.post<User>('/auth/register', {
     email,
     password,
     displayName,
@@ -26,7 +27,7 @@ export async function verifyEmail(token: string): Promise<void> {
   await apiClient.post('/auth/verify-email', { token });
 }
 
-/** F4/US2 — re-send the verification email for the current (logged-in) user. */
-export async function resendVerificationEmail(): Promise<void> {
-  await apiClient.post('/auth/resend-verification');
+/** F4/US2 — re-send the verification email for an unverified account. Anonymous — no session exists to resend from, since login is blocked until verified. */
+export async function resendVerificationEmail(email: string): Promise<void> {
+  await apiClient.post('/auth/resend-verification', { email });
 }

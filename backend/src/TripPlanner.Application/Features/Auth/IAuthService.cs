@@ -9,13 +9,14 @@ namespace TripPlanner.Application.Features.Auth;
 /// </summary>
 public interface IAuthService
 {
-    Task<AuthResponse> RegisterAsync(RegisterRequest request, CancellationToken cancellationToken = default);
+    /// <summary>F4/US1 — creates the account and sends a verification email. Does NOT log the user in (F4/US2: login is blocked until verified).</summary>
+    Task<UserDto> RegisterAsync(RegisterRequest request, CancellationToken cancellationToken = default);
 
     Task<AuthResponse> LoginAsync(LoginRequest request, CancellationToken cancellationToken = default);
 
     /// <summary>F4/US2 — flips IsEmailVerified once the emailed link is opened.</summary>
     Task VerifyEmailAsync(string token, CancellationToken cancellationToken = default);
 
-    /// <summary>F4/US2 — re-sends the verification email for the current (authenticated) user.</summary>
-    Task ResendVerificationEmailAsync(CancellationToken cancellationToken = default);
+    /// <summary>F4/US2 — re-sends the verification email for an unverified account, given its email.</summary>
+    Task ResendVerificationEmailAsync(ResendVerificationRequest request, CancellationToken cancellationToken = default);
 }

@@ -38,7 +38,7 @@ trip itinerary. The repository contains:
   Architecture solution ([TripPlanner.sln](backend/TripPlanner.sln)).
 - A **React 19 + TypeScript + Vite frontend** (`frontend/`).
 - An xUnit test project covering Auth, Trips, Destinations, the generic repository,
-  and JWT token generation (5 test classes, 77 tests total).
+  and JWT token generation (5 test classes, 78 tests total).
 - Dev tooling: `start-dev.bat` / `dev.ps1` / `dev.sh` launch scripts and an optional
   PostgreSQL `docker-compose.yml`.
 
@@ -46,11 +46,11 @@ trip itinerary. The repository contains:
 
 | Feature (per ASSIGNMENT.md) | Backend state | Frontend state |
 |---|---|---|
-| **F4 — User Authentication** (register, login, logout, JWT, email verification) | ✅ Fully implemented ([AuthService.cs](backend/src/TripPlanner.Application/Features/Auth/AuthService.cs), [AuthController.cs](backend/src/TripPlanner.WebApi/Controllers/AuthController.cs)) | ✅ Implemented (LoginPage, RegisterPage, VerifyEmailPage, EmailVerificationBanner, AuthContext, ProtectedRoute) |
+| **F4 — User Authentication** (register, login, logout, JWT, email verification) | ✅ Fully implemented ([AuthService.cs](backend/src/TripPlanner.Application/Features/Auth/AuthService.cs), [AuthController.cs](backend/src/TripPlanner.WebApi/Controllers/AuthController.cs)) | ✅ Implemented (LoginPage, RegisterPage, VerifyEmailPage, AuthContext, ProtectedRoute) |
 | **F1 — Destination Suggestion** (search, attractions) | ✅ Fully implemented ([DestinationService.cs](backend/src/TripPlanner.Application/Features/Destinations/DestinationService.cs), [GeoapifyClient.cs](backend/src/TripPlanner.Infrastructure/ExternalApis/GeoapifyClient.cs)) | ✅ Implemented (SearchPage, CitySearchInput, AttractionsList, NearbyAttractions) |
 | **F2 — Destination Details** | ✅ Fully implemented (`DestinationService.GetDetailsAsync`, provider-first with a DB fallback) | ✅ Implemented (DestinationDetailsPage with a photo carousel) |
 | **F3 — Trip Planner** (CRUD, itinerary, scheduling, drag-and-drop reorder/move) | ✅ Fully implemented — all seven `ITripService` methods ([TripService.cs](backend/src/TripPlanner.Application/Features/Trips/TripService.cs)) | ✅ Implemented (TripsPage, TripDetailPage with native HTML5 drag-and-drop) |
-| **F4/US2 — Email verification** | ✅ Implemented; users are created with `IsEmailVerified = false` and flip to `true` via a one-time link (`AuthService.VerifyEmailAsync`/`ResendVerificationEmailAsync`) | ✅ Implemented (VerifyEmailPage, EmailVerificationBanner, `AuthContext.markEmailVerified`) |
+| **F4/US2 — Email verification** | ✅ Implemented as a hard gate: users are created with `IsEmailVerified = false`, `LoginAsync` throws (403) until a one-time link flips it to `true` (`AuthService.VerifyEmailAsync`); `RegisterAsync` no longer issues a session | ✅ Implemented (VerifyEmailPage; RegisterPage shows a "check your email" state instead of auto-login; LoginPage shows the blocked state + a resend action) |
 
 **[Observed]** All routes, DTOs, domain entities, EF Core mappings, the initial database
 migration, JWT auth plumbing, exception middleware, DI wiring, and Swagger are fully in
@@ -204,12 +204,15 @@ controllers.
    `{FrontendBaseUrl}/verify-email?token=...`; **registration still succeeds even if
    the email itself fails to send** (SMTP down/misconfigured is caught and swallowed —
    see "Email verification" below) so a mail outage never blocks sign-up.
-6. A JWT + `UserDto` is returned — the caller is logged in immediately, before their
-   email is verified.
+6. Only a `UserDto` is returned — **no JWT, no session**. F4/US2 is a hard login gate
+   (see "Login" below), so handing back a working access token at registration would
+   bypass it; the frontend shows a "check your email" success state instead of
+   navigating into the app.
 
 **Edge cases handled [Observed]:** whitespace-only display name → null; mixed-case
 email → lowercased; SMTP failure during registration does not roll back the created
-account (all asserted by `AuthServiceTests`).
+account; registration does not persist a frontend session (all asserted by
+`AuthServiceTests`).
 
 **Edge cases NOT handled [Observed]:**
 - The email check `Contains('@')` accepts strings like `"a@"`; there is no full
@@ -240,33 +243,41 @@ account (all asserted by `AuthServiceTests`).
 2. On a valid token the user is looked up by the id embedded in the token (404 if
    somehow gone) and `IsEmailVerified` is flipped to `true` (idempotent — a second
    verification of an already-verified user is a no-op, no extra save).
-3. `ResendVerificationEmailAsync` reads the **current authenticated user**
-   (`[Authorize]` on the controller action) and resends the same email; if the user is
-   already verified it silently no-ops rather than sending anything.
+3. `ResendVerificationEmailAsync` is **anonymous** (no `[Authorize]`, no JWT read) —
+   it takes `{ Email }` in the request body instead of the current user, because a
+   blocked (unverified) user has no session to authenticate with in the first place.
+   It looks the user up by email and returns the *same* generic 200 response whether
+   the email doesn't exist, is already verified, or is unverified — only the last case
+   actually sends anything, but the response gives no indication which happened
+   (anti-enumeration). **[Observed gap]** the three branches are not equal-time: the
+   unverified branch additionally performs a real SMTP send before returning, so
+   response *timing* (not body/status) can still distinguish "registered but
+   unverified" from the other two cases.
 4. Both the register-time send and the resend share `SendVerificationEmailAsync`,
    which swallows `SmtpException`/`SocketException` (transient mail failures) so a
    flaky/unconfigured SMTP relay never surfaces as an error to the caller.
 
-**Edge cases NOT handled [Observed]:** `LoginAsync` never checks `IsEmailVerified` — an
-unverified user can log in and use the app normally (a deliberate product decision,
-asserted by `AuthServiceTests.LoginAsync_WithUnverifiedEmail_StillReturnsToken`); the
-frontend nudges with a dismissible banner instead of blocking. `SmtpEmailSender` is a
-no-op (returns without sending or throwing) when `Smtp:User`/`Smtp:AppPassword` are
-unconfigured, so a fresh clone with no `.env` silently sends no verification emails at
-all — registration and the UI both behave as if it succeeded.
+**[Observed]** `SmtpEmailSender` is a no-op (returns without sending or throwing) when
+`Smtp:User`/`Smtp:AppPassword` are unconfigured, so a fresh clone with no `.env`
+silently sends no verification emails at all — registration and the resend endpoint
+both behave as if they succeeded.
 
 #### Login (`AuthService.LoginAsync`)
 
 **Flow [Observed]:** normalize email → `GetByEmailAsync` → if user is
 missing **or** `BCrypt.Verify` fails, throw `UnauthorizedException("Invalid email or
 password.")` (→ 401). The error message is identical for both failure modes
-(anti-enumeration, per code comment). On success returns `AuthResponse(AccessToken,
-ExpiresAt, UserDto)` regardless of `IsEmailVerified`.
+(anti-enumeration, per code comment). **Only once the password check succeeds** does
+it check `IsEmailVerified`; if `false`, throws `ForbiddenException("Please verify your
+email before logging in.")` (→ 403) — this ordering matters, since checking
+verification status before the password would leak account existence to a
+wrong-password guess. On success (password correct **and** verified) returns
+`AuthResponse(AccessToken, ExpiresAt, UserDto)`.
 
 **Edge case NOT handled [Observed]:** when the user does not exist, no dummy hash
 verification is performed — the code comment itself notes it "short-circuits for
 clarity", so a timing side-channel between "unknown email" and "wrong password"
-exists. `IsEmailVerified` is never checked at login.
+exists.
 
 #### Logout
 
@@ -468,10 +479,10 @@ produced by [ExceptionHandlingMiddleware](backend/src/TripPlanner.WebApi/Middlew
 
 | Route | Method | Auth | Request body | Success response | Error responses |
 |---|---|---|---|---|---|
-| `/api/auth/register` | POST | anonymous | `RegisterRequest { email, password, displayName? }` | **200 OK** `AuthResponse { accessToken, expiresAt, user: { id, email, displayName, isEmailVerified } }` | **400** validation (bad email / password < 8 chars, with `errors` dictionary extension); **409** email already registered |
-| `/api/auth/login` | POST | anonymous | `LoginRequest { email, password }` | **200 OK** `AuthResponse` (same shape) | **401** "Invalid email or password." |
+| `/api/auth/register` | POST | anonymous | `RegisterRequest { email, password, displayName? }` | **200 OK** `UserDto { id, email, displayName, isEmailVerified }` — **no token, no session** | **400** validation (bad email / password < 8 chars, with `errors` dictionary extension); **409** email already registered |
+| `/api/auth/login` | POST | anonymous | `LoginRequest { email, password }` | **200 OK** `AuthResponse { accessToken, expiresAt, user }` | **401** "Invalid email or password."; **403** "Please verify your email before logging in." |
 | `/api/auth/verify-email` | POST | anonymous | `VerifyEmailRequest { token }` | **200 OK** (no body) | **400** invalid/expired/wrong-purpose token |
-| `/api/auth/resend-verification` | POST | **`[Authorize]`** | — | **200 OK** (no body; also 200 when already verified — a silent no-op) | **401** anonymous |
+| `/api/auth/resend-verification` | POST | anonymous | `ResendVerificationRequest { email }` | **200 OK** (no body; identical for unknown/already-verified/unverified emails — anti-enumeration) | **400** validation (bad email shape) |
 
 Notes [Observed]:
 - Register returns **200**, not 201 (`Ok(response)` in the controller; the
@@ -542,8 +553,10 @@ enforcement** — entities are mutable classes with public setters. [Observed]
 ### 5.2 DTOs (Application layer, C# records)
 
 - **Auth:** `RegisterRequest`, `LoginRequest`, `UserDto` (now includes
-  `IsEmailVerified`), `VerifyEmailRequest`, `AuthResponse` — the password hash never
-  appears in any DTO. [Observed]
+  `IsEmailVerified`), `VerifyEmailRequest`, `ResendVerificationRequest { Email }`,
+  `AuthResponse` — the password hash never appears in any DTO. `AuthResponse` (which
+  carries the JWT) is now returned **only** by `LoginAsync`; `RegisterAsync` returns a
+  bare `UserDto` since registration no longer creates a session. [Observed]
 - **Destinations:** `LocationSuggestionDto`, `DestinationSummaryDto` (still includes
   `Rating` — a field that does **not** exist on the `Destination` entity; it is
   populated straight from a live provider call and is always `null` for Geoapify,
@@ -602,6 +615,7 @@ following `api/auth.ts`'s pattern — no raw `fetch`/`axios` calls remain in com
 | B18 | `SortOrder` within a bucket (day or Saved Places) is kept dense (0..n) after any add/reorder/move/remove | `TripService.Resequence`, called from `UpdateItineraryItemAsync` — **not** a DB constraint (no unique index on `SortOrder`; see §8.4) | — |
 | B19 | Trip list/detail/add/remove/reorder are all scoped to the caller (NFR 6) | every `TripService` method resolves `userId` via `ICurrentUserService.GetRequiredUserId()` and every repository query filters by it (`ITripRepository.GetSummaryRowsForUserAsync`/`GetDetailsAsync`/`GetTrackedWithFullGraphAsync`/`GetOwnedItemAsync`) | 401 anonymous; 404 for someone else's trip (indistinguishable from "doesn't exist") |
 | B20 | Provider/browse results are cached (cache-aside, `IMemoryCache`) with TTLs of 24h (locations, details), 6h (attractions), and stale-while-revalidate fallback on a provider outage | `DestinationService.GetCachedAsync`/`GetCachedProviderDetailsAsync`/`GetAttractionImagesAsync` | — |
+| B21 | Login is blocked until the email is verified — checked only after the password is confirmed correct, so a wrong-password guess never reveals verification status | `AuthService.LoginAsync` throws `ForbiddenException` when `IsEmailVerified` is `false`; registration does not issue a session, so this is the only way in | 403 |
 
 ### 6.2 Inferred / partially-enforced behavior
 
@@ -990,12 +1004,12 @@ rather than being mapped to 409.
 
 ### Testing [Observed]
 
-Five test classes under `backend/tests/TripPlanner.Application.Tests/`, **77 tests
+Five test classes under `backend/tests/TripPlanner.Application.Tests/`, **78 tests
 total, all passing** (`dotnet test`):
 
 | Class | Tests | Covers |
 |---|---|---|
-| [AuthServiceTests](backend/tests/TripPlanner.Application.Tests/Auth/AuthServiceTests.cs) | 12 | Register (success/duplicate email/short password), login (success/wrong password/unverified-still-succeeds), email verification (send-on-register, send failure doesn't block registration, verify with valid/invalid token, resend when unverified/already-verified) |
+| [AuthServiceTests](backend/tests/TripPlanner.Application.Tests/Auth/AuthServiceTests.cs) | 13 | Register (success/duplicate email/short password, no session issued), login (success when verified/wrong password even when unverified/**blocked with 403 when unverified**), email verification (send-on-register, send failure doesn't block registration, verify with valid/invalid token, resend for unknown/already-verified/unverified emails) |
 | [TripServiceTests](backend/tests/TripPlanner.Application.Tests/Trips/TripServiceTests.cs) | 27 | Create/list (including NFR 6 ownership filtering and newest-first ordering), full add/move/reorder/schedule coverage, day regeneration on date changes, duplicate-in-bucket conflicts |
 | [DestinationServiceTests](backend/tests/TripPlanner.Application.Tests/Destinations/DestinationServiceTests.cs) | 29 | Search/attractions/details (F1 US1-3, F2 US1), validation errors, cache hit/miss/expiry (via a fake `TimeProvider`), stale-on-provider-outage fallback, image enrichment |
 | [RepositoryTests](backend/tests/TripPlanner.Application.Tests/Repositories/RepositoryTests.cs) | 5 | Generic `Repository<T>` + `UnitOfWork` only (add/get/get-all), using `Destination` as a stand-in entity — no dedicated `TripRepository`/`UserRepository` named-query tests exist; those queries are exercised indirectly through `TripServiceTests`/`AuthServiceTests` |

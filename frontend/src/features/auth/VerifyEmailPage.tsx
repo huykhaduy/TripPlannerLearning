@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { getErrorMessage } from '../../api/client';
 import { verifyEmail } from '../../api/auth';
-import { useAuth } from '../../auth/AuthContext';
 import { Card } from '../../components/Card';
 
 type Status = 'verifying' | 'success' | 'error';
@@ -11,7 +10,6 @@ type Status = 'verifying' | 'success' | 'error';
 export function VerifyEmailPage() {
   const [searchParams] = useSearchParams();
   const token = searchParams.get('token');
-  const { markEmailVerified } = useAuth();
 
   const [status, setStatus] = useState<Status>('verifying');
   const [error, setError] = useState<string | null>(null);
@@ -27,7 +25,6 @@ export function VerifyEmailPage() {
     verifyEmail(token)
       .then(() => {
         if (ignore) return;
-        markEmailVerified();
         setStatus('success');
       })
       .catch((err) => {
@@ -39,10 +36,6 @@ export function VerifyEmailPage() {
     return () => {
       ignore = true;
     };
-    // markEmailVerified's identity changes whenever `user` changes (e.g. an
-    // unrelated auto-logout elsewhere), which would re-run this and re-POST
-    // an already-used token — re-verify only when the URL token itself changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
   return (
@@ -54,8 +47,8 @@ export function VerifyEmailPage() {
           <>
             <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Email verified</h1>
             <p className="mt-2 text-sm text-slate-500">Your account is now fully active.</p>
-            <Link to="/trips" className="mt-4 inline-block text-sm text-brand-600 hover:underline">
-              Go to My trips
+            <Link to="/login" className="mt-4 inline-block text-sm text-brand-600 hover:underline">
+              You can now log in
             </Link>
           </>
         )}

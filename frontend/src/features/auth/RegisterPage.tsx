@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { Link, Navigate, useNavigate } from 'react-router-dom';
+import { Link, Navigate } from 'react-router-dom';
 import { getErrorMessage } from '../../api/client';
 import { useAuth } from '../../auth/AuthContext';
 import { Card } from '../../components/Card';
@@ -9,13 +9,13 @@ import { Button } from '../../components/Button';
 /** Feature 4 / US1 — sign up with email and password. */
 export function RegisterPage() {
   const { register, isAuthenticated } = useAuth();
-  const navigate = useNavigate();
 
   const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [registered, setRegistered] = useState(false);
 
   // Already signed in — the form makes no sense; go to the planner.
   if (isAuthenticated) {
@@ -28,12 +28,31 @@ export function RegisterPage() {
     setSubmitting(true);
     try {
       await register(email, password, displayName || undefined);
-      navigate('/trips');
+      // No session is created (F4/US2) — the account still needs verifying
+      // before login will succeed.
+      setRegistered(true);
     } catch (err) {
       setError(getErrorMessage(err, 'Registration failed.'));
     } finally {
       setSubmitting(false);
     }
+  }
+
+  if (registered) {
+    return (
+      <div className="flex min-h-[65vh] items-center justify-center">
+        <Card className="w-full max-w-sm text-center">
+          <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Check your email</h1>
+          <p className="mt-2 text-sm text-slate-500">
+            We&apos;ve sent a verification link to <strong>{email}</strong>. Click it to activate your account, then
+            log in.
+          </p>
+          <Link to="/login" className="mt-4 inline-block text-sm text-brand-600 hover:underline">
+            Go to log in
+          </Link>
+        </Card>
+      </div>
+    );
   }
 
   return (

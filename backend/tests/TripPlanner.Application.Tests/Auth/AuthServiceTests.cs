@@ -27,7 +27,7 @@ public class AuthServiceTests
             .UseInMemoryDatabase(databaseName: Guid.NewGuid().ToString())
             .Options);
 
-    private static AuthService CreateSut(ApplicationDbContext db, Guid? currentUserId = null, Mock<IEmailSender>? emailSender = null)
+    private static AuthService CreateSut(ApplicationDbContext db, Mock<IEmailSender>? emailSender = null)
     {
         var users = new UserRepository(db);
         var unitOfWork = new UnitOfWork(db);
@@ -56,28 +56,24 @@ public class AuthServiceTests
         var appUrls = new Mock<IAppUrlProvider>();
         appUrls.Setup(p => p.FrontendBaseUrl).Returns("http://localhost:5173");
 
-        var currentUser = new Mock<ICurrentUserService>();
-        currentUser.Setup(c => c.UserId).Returns(currentUserId);
-
-        // Real validator — it's pure logic, so mocking it would only hide bugs.
+        // Real validators — pure logic, so mocking them would only hide bugs.
         return new AuthService(
-            users, unitOfWork, hasher, tokenGenerator.Object, email.Object, appUrls.Object, currentUser.Object,
-            new RegisterRequestValidator());
+            users, unitOfWork, hasher, tokenGenerator.Object, email.Object, appUrls.Object,
+            new RegisterRequestValidator(), new ResendVerificationRequestValidator());
     }
 
     [Fact]
-    public async Task RegisterAsync_WithNewEmail_CreatesUserAndReturnsToken()
+    public async Task RegisterAsync_WithNewEmail_CreatesUserButDoesNotLogIn()
     {
         using var db = CreateDb();
         var sut = CreateSut(db);
 
         var result = await sut.RegisterAsync(new RegisterRequest("New@Example.com", "password123", "Newbie"));
 
-        Assert.Equal("fake-jwt", result.AccessToken);
-        Assert.Equal("new@example.com", result.User.Email); // normalised to lower-case
+        Assert.Equal("new@example.com", result.Email); // normalised to lower-case
         Assert.Equal(1, await db.Users.CountAsync());
         Assert.NotEqual("password123", db.Users.Single().PasswordHash); // stored as a hash
-        Assert.False(result.User.IsEmailVerified); // F4/US2 — starts unverified
+        Assert.False(result.IsEmailVerified); // F4/US2 — starts unverified; no session is issued
     }
 
     [Fact]
@@ -106,7 +102,7 @@ public class AuthServiceTests
 
         var result = await sut.RegisterAsync(new RegisterRequest("new@example.com", "password123", null));
 
-        Assert.Equal("fake-jwt", result.AccessToken); // registration succeeds regardless
+        Assert.Equal("new@example.com", result.Email); // registration succeeds regardless
         Assert.Equal(1, await db.Users.CountAsync());
     }
 
@@ -136,16 +132,21 @@ public class AuthServiceTests
     {
         using var db = CreateDb();
         var sut = CreateSut(db);
-        await sut.RegisterAsync(new RegisterRequest("user@example.com", "password123", null));
+        var registered = await sut.RegisterAsync(new RegisterRequest("user@example.com", "password123", null));
+        await sut.VerifyEmailAsync($"verify-token-for-{registered.Id}");
 
         var result = await sut.LoginAsync(new LoginRequest("user@example.com", "password123"));
 
         Assert.Equal("fake-jwt", result.AccessToken);
+        Assert.True(result.User.IsEmailVerified);
     }
 
     [Fact]
-    public async Task LoginAsync_WithWrongPassword_ThrowsUnauthorized()
+    public async Task LoginAsync_WithWrongPassword_ThrowsUnauthorized_EvenThoughUnverified()
     {
+        // The account is unverified (registration's default) here on purpose —
+        // wrong-password must still get the generic 401, not leak the
+        // unverified-account 403, regardless of verification status.
         using var db = CreateDb();
         var sut = CreateSut(db);
         await sut.RegisterAsync(new RegisterRequest("user@example.com", "password123", null));
@@ -155,18 +156,15 @@ public class AuthServiceTests
     }
 
     [Fact]
-    public async Task LoginAsync_WithUnverifiedEmail_StillReturnsToken()
+    public async Task LoginAsync_WithUnverifiedEmail_ThrowsForbidden()
     {
-        // Deliberate product decision: unverified accounts can still log in and
-        // use the app (a reminder banner nudges them, not a login block).
+        // F4/US2 — login is blocked until the account is verified.
         using var db = CreateDb();
         var sut = CreateSut(db);
         await sut.RegisterAsync(new RegisterRequest("user@example.com", "password123", null));
 
-        var result = await sut.LoginAsync(new LoginRequest("user@example.com", "password123"));
-
-        Assert.False(result.User.IsEmailVerified);
-        Assert.Equal("fake-jwt", result.AccessToken);
+        await Assert.ThrowsAsync<ForbiddenException>(() =>
+            sut.LoginAsync(new LoginRequest("user@example.com", "password123")));
     }
 
     [Fact]
@@ -175,7 +173,7 @@ public class AuthServiceTests
         using var db = CreateDb();
         var sut = CreateSut(db);
         var registered = await sut.RegisterAsync(new RegisterRequest("user@example.com", "password123", null));
-        var token = $"verify-token-for-{registered.User.Id}";
+        var token = $"verify-token-for-{registered.Id}";
 
         await sut.VerifyEmailAsync(token);
 
@@ -196,12 +194,11 @@ public class AuthServiceTests
     {
         using var db = CreateDb();
         var emailSender = new Mock<IEmailSender>();
-        var setupSut = CreateSut(db, emailSender: emailSender);
-        var registered = await setupSut.RegisterAsync(new RegisterRequest("user@example.com", "password123", null));
+        var sut = CreateSut(db, emailSender: emailSender);
+        await sut.RegisterAsync(new RegisterRequest("user@example.com", "password123", null));
         emailSender.Invocations.Clear(); // ignore the email RegisterAsync already sent
 
-        var sut = CreateSut(db, currentUserId: registered.User.Id, emailSender: emailSender);
-        await sut.ResendVerificationEmailAsync();
+        await sut.ResendVerificationEmailAsync(new ResendVerificationRequest("user@example.com"));
 
         emailSender.Verify(
             e => e.SendAsync("user@example.com", It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
@@ -213,13 +210,27 @@ public class AuthServiceTests
     {
         using var db = CreateDb();
         var emailSender = new Mock<IEmailSender>();
-        var setupSut = CreateSut(db, emailSender: emailSender);
-        var registered = await setupSut.RegisterAsync(new RegisterRequest("user@example.com", "password123", null));
-        await setupSut.VerifyEmailAsync($"verify-token-for-{registered.User.Id}");
+        var sut = CreateSut(db, emailSender: emailSender);
+        var registered = await sut.RegisterAsync(new RegisterRequest("user@example.com", "password123", null));
+        await sut.VerifyEmailAsync($"verify-token-for-{registered.Id}");
         emailSender.Invocations.Clear();
 
-        var sut = CreateSut(db, currentUserId: registered.User.Id, emailSender: emailSender);
-        await sut.ResendVerificationEmailAsync();
+        await sut.ResendVerificationEmailAsync(new ResendVerificationRequest("user@example.com"));
+
+        emailSender.Verify(
+            e => e.SendAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task ResendVerificationEmailAsync_WithUnknownEmail_DoesNotThrowAndSendsNoEmail()
+    {
+        // An anonymous endpoint must not reveal whether an email is registered.
+        using var db = CreateDb();
+        var emailSender = new Mock<IEmailSender>();
+        var sut = CreateSut(db, emailSender: emailSender);
+
+        await sut.ResendVerificationEmailAsync(new ResendVerificationRequest("nobody@example.com"));
 
         emailSender.Verify(
             e => e.SendAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),

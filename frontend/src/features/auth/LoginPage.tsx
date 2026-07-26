@@ -1,12 +1,14 @@
 import { useState, type FormEvent } from 'react';
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
+import axios from 'axios';
 import { getErrorMessage } from '../../api/client';
+import { resendVerificationEmail } from '../../api/auth';
 import { useAuth } from '../../auth/AuthContext';
 import { Card } from '../../components/Card';
 import { Field, fieldControlClass } from '../../components/Field';
 import { Button } from '../../components/Button';
 
-/** Feature 4 / US3 — log in with email and password. */
+/** Feature 4 / US3 — log in with email and password. Blocked (F4/US2) until the account is verified. */
 export function LoginPage() {
   const { login, isAuthenticated } = useAuth();
   const navigate = useNavigate();
@@ -20,6 +22,9 @@ export function LoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [unverified, setUnverified] = useState(false);
+  const [resending, setResending] = useState(false);
+  const [resent, setResent] = useState(false);
 
   // Already signed in — the form makes no sense; go back (or to the planner).
   if (isAuthenticated) {
@@ -29,15 +34,32 @@ export function LoginPage() {
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
     setError(null);
+    setUnverified(false);
+    setResent(false);
     setSubmitting(true);
     try {
       await login(email, password);
       // Forward the state so AddToTripButton can resume the pending add.
       navigate(from, { replace: true, state: location.state });
     } catch (err) {
+      if (axios.isAxiosError(err) && err.response?.status === 403) {
+        setUnverified(true);
+      }
       setError(getErrorMessage(err, 'Login failed.'));
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function handleResend() {
+    setResending(true);
+    try {
+      await resendVerificationEmail(email);
+      setResent(true);
+    } catch (err) {
+      setError(getErrorMessage(err, 'Could not resend the email. Please try again.'));
+    } finally {
+      setResending(false);
     }
   }
 
@@ -65,6 +87,14 @@ export function LoginPage() {
             />
           </Field>
           {error && <p className="text-sm text-red-600">{error}</p>}
+          {unverified &&
+            (resent ? (
+              <p className="text-sm text-slate-500">Verification email sent — check your inbox.</p>
+            ) : (
+              <Button type="button" variant="secondary" size="sm" onClick={handleResend} disabled={resending}>
+                {resending ? 'Sending…' : 'Resend verification email'}
+              </Button>
+            ))}
           <Button type="submit" disabled={submitting}>
             {submitting ? 'Signing in…' : 'Log in'}
           </Button>
