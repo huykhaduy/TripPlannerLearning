@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
-import axios from 'axios';
+import { getErrorMessage } from '../../api/client';
 import { useAuth } from '../../auth/AuthContext';
 import { Card } from '../../components/Card';
 import { Field, fieldControlClass } from '../../components/Field';
@@ -35,11 +35,7 @@ export function LoginPage() {
       // Forward the state so AddToTripButton can resume the pending add.
       navigate(from, { replace: true, state: location.state });
     } catch (err) {
-      // The API returns a ProblemDetails body with a friendly "detail" message.
-      const message = axios.isAxiosError(err)
-        ? (err.response?.data?.detail ?? 'Login failed.')
-        : 'Login failed.';
-      setError(message);
+      setError(getErrorMessage(err, 'Login failed.'));
     } finally {
       setSubmitting(false);
     }

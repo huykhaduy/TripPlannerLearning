@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import axios from 'axios';
+import { getErrorMessage } from '../../api/client';
 import { verifyEmail } from '../../api/auth';
 import { useAuth } from '../../auth/AuthContext';
 import { Card } from '../../components/Card';
@@ -32,16 +32,16 @@ export function VerifyEmailPage() {
       })
       .catch((err) => {
         if (ignore) return;
-        const message = axios.isAxiosError(err)
-          ? (err.response?.data?.detail ?? 'This verification link is invalid or has expired.')
-          : 'This verification link is invalid or has expired.';
-        setError(message);
+        setError(getErrorMessage(err, 'This verification link is invalid or has expired.'));
         setStatus('error');
       });
 
     return () => {
       ignore = true;
     };
+    // markEmailVerified's identity changes whenever `user` changes (e.g. an
+    // unrelated auto-logout elsewhere), which would re-run this and re-POST
+    // an already-used token — re-verify only when the URL token itself changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 

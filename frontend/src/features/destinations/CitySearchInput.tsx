@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useState, type KeyboardEvent } from 'react';
 import { searchLocations } from '../../api/destinations';
 import { useDebounce } from '../../hooks/useDebounce';
 import type { LocationSuggestion } from '../../types';
@@ -30,6 +30,8 @@ export function CitySearchInput({
   // Also seeded from initialCity so a restored city (from the URL) doesn't
   // immediately re-search itself on mount.
   const [pickedLabel, setPickedLabel] = useState<string | null>(initialLabel || null);
+  const [activeIndex, setActiveIndex] = useState(-1);
+  const listboxId = useId();
 
   // The useState initializers above only seed the FIRST render. Without this,
   // browser back/forward restoring a DIFFERENT city in the URL updates the
@@ -77,6 +79,10 @@ export function CitySearchInput({
     };
   }, [debouncedQuery, pickedLabel]);
 
+  useEffect(() => {
+    setActiveIndex(-1);
+  }, [suggestions]);
+
   function handlePick(city: LocationSuggestion) {
     const label = formatCity(city);
     setQuery(label);
@@ -86,6 +92,22 @@ export function CitySearchInput({
     onSelect(city);
   }
 
+  function handleKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (!open || suggestions.length === 0) return;
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      setActiveIndex((i) => (i + 1) % suggestions.length);
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      setActiveIndex((i) => (i - 1 + suggestions.length) % suggestions.length);
+    } else if (event.key === 'Enter' && activeIndex >= 0) {
+      event.preventDefault();
+      handlePick(suggestions[activeIndex]);
+    } else if (event.key === 'Escape') {
+      setOpen(false);
+    }
+  }
+
   return (
     <div className="relative">
       <input
@@ -93,7 +115,13 @@ export function CitySearchInput({
         placeholder="Search for a city, e.g. Paris"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
+        onKeyDown={handleKeyDown}
         aria-label="Search for a city"
+        role="combobox"
+        aria-expanded={open}
+        aria-controls={listboxId}
+        aria-autocomplete="list"
+        aria-activedescendant={activeIndex >= 0 ? `${listboxId}-option-${activeIndex}` : undefined}
         className="w-full rounded-full border border-slate-300 bg-white px-5 py-3 text-base text-slate-900 shadow-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-200"
       />
       {loading && <p className="mt-2 text-sm text-white/80">Searching…</p>}
@@ -102,13 +130,17 @@ export function CitySearchInput({
         <p className="mt-2 text-sm text-white/80">No matching cities found.</p>
       )}
       {open && suggestions.length > 0 && (
-        <ul className="absolute inset-x-0 top-full z-10 mt-2 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg">
-          {suggestions.map((city) => (
-            <li key={`${city.latitude},${city.longitude}`}>
+        <ul id={listboxId} role="listbox" className="absolute inset-x-0 top-full z-10 mt-2 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg">
+          {suggestions.map((city, index) => (
+            <li key={`${city.latitude},${city.longitude}`} role="presentation">
               <button
+                id={`${listboxId}-option-${index}`}
+                role="option"
+                aria-selected={index === activeIndex}
                 type="button"
                 onClick={() => handlePick(city)}
-                className="block w-full px-4 py-2.5 text-left hover:bg-brand-50"
+                onMouseEnter={() => setActiveIndex(index)}
+                className={`block w-full px-4 py-2.5 text-left hover:bg-brand-50 ${index === activeIndex ? 'bg-brand-50' : ''}`}
               >
                 {formatCity(city)}
               </button>

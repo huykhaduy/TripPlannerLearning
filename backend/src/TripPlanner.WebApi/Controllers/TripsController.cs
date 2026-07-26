@@ -6,10 +6,9 @@ using TripPlanner.Application.Features.Trips.Dtos;
 namespace TripPlanner.WebApi.Controllers;
 
 /// <summary>
-/// Trip planner endpoints (Feature 3). The routes are wired for you and the
-/// whole controller requires authentication ([Authorize]) — but the underlying
-/// <see cref="ITripService"/> is a STUB. Implement the service, then these
-/// endpoints come alive. Add/adjust endpoints as you build out US4–US9.
+/// Trip planner endpoints (Feature 3). The whole controller requires
+/// authentication (<see cref="AuthorizeAttribute"/>); every route delegates to
+/// <see cref="ITripService"/>, which enforces per-user ownership (NFR 6).
 /// </summary>
 [ApiController]
 [Route("api/[controller]")]

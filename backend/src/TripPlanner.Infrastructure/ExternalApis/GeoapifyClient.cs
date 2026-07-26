@@ -10,12 +10,10 @@ using TripPlanner.Application.Features.Destinations.Dtos;
 namespace TripPlanner.Infrastructure.ExternalApis;
 
 /// <summary>
-/// STUB — students implement this (Features 1 &amp; 2).
-///
-/// This is the concrete <see cref="IDestinationProvider"/>. It receives a typed
+/// The concrete <see cref="IDestinationProvider"/>, backed by the Geoapify
+/// Geocoding and Places APIs (https://apidocs.geoapify.com/docs) via a typed
 /// <see cref="HttpClient"/> (configured in DependencyInjection, base address
-/// https://api.geoapify.com/) and should call the Geoapify Geocoding and Places
-/// APIs (https://apidocs.geoapify.com/docs).
+/// https://api.geoapify.com/).
 ///
 /// Endpoint map:
 ///   * SearchLocationsAsync        → GET v1/geocode/autocomplete?text={query}&amp;type=city&amp;limit=5&amp;apiKey={key}
@@ -24,14 +22,11 @@ namespace TripPlanner.Infrastructure.ExternalApis;
 ///                                     (note: Geoapify wants LON before LAT, and radius in METERS)
 ///   * GetDestinationDetailsAsync  → GET v2/place-details?id={placeId}&amp;apiKey={key}
 ///
-/// Tips:
-///   * read the API key from configuration ("Geoapify:ApiKey") — never hard-code secrets;
-///   * use System.Text.Json to deserialize responses into private DTOs, then
-///     map to the public DTOs in Application;
-///   * handle missing fields gracefully — Geoapify has no ratings and few images,
-///     so Rating/ImageUrl will often be null (the UI shows placeholders).
-///
-/// Get a free Geoapify key at https://myprojects.geoapify.com/
+/// Deserializes responses into private DTOs via System.Text.Json, then maps to
+/// the public DTOs in Application. Geoapify has no ratings and few images, so
+/// Rating/ImageUrl are often null (the UI shows placeholders); the API key
+/// comes from configuration ("Geoapify:ApiKey" — a free key at
+/// https://myprojects.geoapify.com/).
 /// </summary>
 public class GeoapifyClient : IDestinationProvider
 {

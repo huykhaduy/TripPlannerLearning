@@ -7,7 +7,7 @@ namespace TripPlanner.WebApi.Controllers;
 /// <summary>
 /// Destination search &amp; details endpoints (Features 1 &amp; 2). These are PUBLIC
 /// (no [Authorize]) because users browse destinations before logging in
-/// (F3/US8). The underlying <see cref="IDestinationService"/> is a STUB.
+/// (F3/US8).
 /// </summary>
 [ApiController]
 [Route("api/[controller]")]

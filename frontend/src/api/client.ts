@@ -47,3 +47,8 @@ export function clearToken(): void {
 export function getToken(): string | null {
   return localStorage.getItem(TOKEN_STORAGE_KEY);
 }
+
+/** The API returns a ProblemDetails body with a friendly "detail" message on failure. */
+export function getErrorMessage(err: unknown, fallback: string): string {
+  return axios.isAxiosError(err) ? (err.response?.data?.detail ?? fallback) : fallback;
+}

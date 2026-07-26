@@ -3,10 +3,9 @@ using TripPlanner.Application.Features.Trips.Dtos;
 namespace TripPlanner.Application.Features.Trips;
 
 /// <summary>
-/// Trip planning use-cases (Feature 3). All methods operate on the CURRENT user
-/// only (NFR 6) — read the user id from <see cref="Common.Interfaces.ICurrentUserService"/>.
-///
-/// TODO (students): implement <see cref="TripService"/>.
+/// Trip planning use-cases (Feature 3), implemented by <see cref="TripService"/>.
+/// All methods operate on the CURRENT user only (NFR 6) — read the user id from
+/// <see cref="Common.Interfaces.ICurrentUserService"/>.
 /// </summary>
 public interface ITripService
 {

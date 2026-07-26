@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import axios from 'axios';
+import { getErrorMessage } from '../../api/client';
 import { useAuth } from '../../auth/AuthContext';
 import { getMyTrips, getTrip, addDestination } from '../../api/trips';
 import { Button } from '../../components/Button';
@@ -30,8 +30,7 @@ export function AddToTripButton({ attraction }: { attraction: AttractionSummary 
       // Clear the note so refresh/back doesn't re-open the dialog.
       navigate(location.pathname, { replace: true, state: null });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAuthenticated, location.state]);
+  }, [isAuthenticated, location.state, location.pathname, attraction.providerId, navigate]);
 
   function handleClick() {
     if (!isAuthenticated) {
@@ -122,10 +121,7 @@ function AddToTripDialog({
       await addDestination(tripId, attraction.providerId, dayId || null);
       onAdded();
     } catch (err) {
-      const message = axios.isAxiosError(err)
-        ? (err.response?.data?.detail ?? 'Could not add the destination.')
-        : 'Could not add the destination.';
-      setError(message);
+      setError(getErrorMessage(err, 'Could not add the destination.'));
     } finally {
       setAdding(false);
     }

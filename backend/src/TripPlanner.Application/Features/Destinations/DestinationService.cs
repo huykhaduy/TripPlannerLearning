@@ -11,16 +11,14 @@ using TripPlanner.Domain.Entities;
 namespace TripPlanner.Application.Features.Destinations;
 
 /// <summary>
-/// STUB — students implement this (Features 1 &amp; 2).
+/// Destination search, attractions, and details (Features 1 &amp; 2).
 ///
-/// Suggested approach:
-///   * call <see cref="IDestinationProvider"/> for raw data;
-///   * de-duplicate, rank by relevance, cap results (F1 business rules);
-///   * optionally cache popular searches to meet the performance NFRs;
-///   * map provider models to the DTOs in this folder.
-///
-/// Every method currently throws <see cref="NotImplementedException"/> so the
-/// project compiles and the API surface is visible in Swagger from day one.
+/// Calls <see cref="IDestinationProvider"/> for raw data, de-duplicates and
+/// ranks/caps results per the F1 business rules, and maps provider models to
+/// the DTOs in this folder. <see cref="Destination"/> rows are a cache of
+/// external-provider data keyed by <c>ProviderId</c> — this service never
+/// persists a new row itself; see <see cref="Trips.TripService.GetOrCreateDestinationAsync"/>
+/// for the upsert-on-first-add path.
 /// </summary>
 public class DestinationService : IDestinationService
 {

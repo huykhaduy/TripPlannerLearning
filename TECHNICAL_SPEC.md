@@ -13,10 +13,15 @@
 >   from framework defaults or from how components are wired), but not written as an
 >   explicit statement in the code.
 >
-> The single most important AS-IS fact: **only Feature 4 (Authentication) is
-> implemented.** The Trip Planner and Destination services exist as compiling stubs
-> whose every method throws `NotImplementedException`, which the middleware translates
-> to HTTP **501 Not Implemented**. [Observed]
+> The single most important AS-IS fact: **all four features are implemented.**
+> Feature 4 (Authentication, including optional email verification) is the reference
+> slice; Feature 1 (Destination Suggestion), Feature 2 (Destination Details), and
+> Feature 3 (Trip Planner, including the US4–US6 drag-and-drop reorder/move-between-days
+> logic) have since been built out by the student and are no longer stubs. A
+> Repository + Unit of Work pattern replaced direct `DbSet<T>`/`IApplicationDbContext`
+> access (that interface no longer exists anywhere in the codebase), and every public
+> service method now validates its input through a FluentValidation validator before
+> doing any work. [Observed]
 
 ---
 
@@ -32,7 +37,8 @@ trip itinerary. The repository contains:
 - A **.NET 10 Web API backend** (`backend/`) structured as a 4-project Clean
   Architecture solution ([TripPlanner.sln](backend/TripPlanner.sln)).
 - A **React 19 + TypeScript + Vite frontend** (`frontend/`).
-- An xUnit test project covering the Auth service.
+- An xUnit test project covering Auth, Trips, Destinations, the generic repository,
+  and JWT token generation (5 test classes, 77 tests total).
 - Dev tooling: `start-dev.bat` / `dev.ps1` / `dev.sh` launch scripts and an optional
   PostgreSQL `docker-compose.yml`.
 
@@ -40,36 +46,53 @@ trip itinerary. The repository contains:
 
 | Feature (per ASSIGNMENT.md) | Backend state | Frontend state |
 |---|---|---|
-| **F4 — User Authentication** (register, login, logout, JWT) | ✅ Fully implemented ([AuthService.cs](backend/src/TripPlanner.Application/Features/Auth/AuthService.cs), [AuthController.cs](backend/src/TripPlanner.WebApi/Controllers/AuthController.cs)) | ✅ Implemented (LoginPage, RegisterPage, AuthContext, ProtectedRoute) |
-| **F1 — Destination Suggestion** (search, attractions) | ❌ Stub — every method throws `NotImplementedException` ([DestinationService.cs](backend/src/TripPlanner.Application/Features/Destinations/DestinationService.cs), [GeoapifyClient.cs](backend/src/TripPlanner.Infrastructure/ExternalApis/GeoapifyClient.cs)) | ❌ Stub placeholder page ([SearchPage.tsx](frontend/src/features/destinations/SearchPage.tsx)) |
-| **F2 — Destination Details** | ❌ Stub (`GetDetailsAsync` throws) | ❌ No details view exists |
-| **F3 — Trip Planner** (CRUD, itinerary, scheduling) | ❌ Stub — all six `TripService` methods throw ([TripService.cs](backend/src/TripPlanner.Application/Features/Trips/TripService.cs)) | ❌ Stub placeholder page ([TripsPage.tsx](frontend/src/features/trips/TripsPage.tsx)) |
-| **F4/US2 — Email verification** | ❌ Not implemented; users are created with `IsEmailVerified = true` ([AuthService.cs:61](backend/src/TripPlanner.Application/Features/Auth/AuthService.cs:61)) | — |
+| **F4 — User Authentication** (register, login, logout, JWT, email verification) | ✅ Fully implemented ([AuthService.cs](backend/src/TripPlanner.Application/Features/Auth/AuthService.cs), [AuthController.cs](backend/src/TripPlanner.WebApi/Controllers/AuthController.cs)) | ✅ Implemented (LoginPage, RegisterPage, VerifyEmailPage, EmailVerificationBanner, AuthContext, ProtectedRoute) |
+| **F1 — Destination Suggestion** (search, attractions) | ✅ Fully implemented ([DestinationService.cs](backend/src/TripPlanner.Application/Features/Destinations/DestinationService.cs), [GeoapifyClient.cs](backend/src/TripPlanner.Infrastructure/ExternalApis/GeoapifyClient.cs)) | ✅ Implemented (SearchPage, CitySearchInput, AttractionsList, NearbyAttractions) |
+| **F2 — Destination Details** | ✅ Fully implemented (`DestinationService.GetDetailsAsync`, provider-first with a DB fallback) | ✅ Implemented (DestinationDetailsPage with a photo carousel) |
+| **F3 — Trip Planner** (CRUD, itinerary, scheduling, drag-and-drop reorder/move) | ✅ Fully implemented — all seven `ITripService` methods ([TripService.cs](backend/src/TripPlanner.Application/Features/Trips/TripService.cs)) | ✅ Implemented (TripsPage, TripDetailPage with native HTML5 drag-and-drop) |
+| **F4/US2 — Email verification** | ✅ Implemented; users are created with `IsEmailVerified = false` and flip to `true` via a one-time link (`AuthService.VerifyEmailAsync`/`ResendVerificationEmailAsync`) | ✅ Implemented (VerifyEmailPage, EmailVerificationBanner, `AuthContext.markEmailVerified`) |
 
 **[Observed]** All routes, DTOs, domain entities, EF Core mappings, the initial database
 migration, JWT auth plumbing, exception middleware, DI wiring, and Swagger are fully in
-place — the stubs are intentionally wired into DI so the API surface is visible in
-Swagger from day one (stated in the `DestinationService` XML doc comment).
+place, and every feature slice now has an executable implementation behind it — the
+`AuthController`/`AuthService` doc comments still label Auth the "REFERENCE
+IMPLEMENTATION" others were meant to be modeled on, but that framing is now historical:
+Destinations and Trips have their own real business logic (caching, upsert-on-first-add,
+day regeneration, ownership filtering), not a copy of Auth's.
 
-### 1.3 Intended behavior (inferred from scaffolding, not implemented)
+**[Observed] Stale doc comments not yet cleaned up:** `GeoapifyClient.cs`'s XML doc
+comment still opens with "STUB — students implement this (Features 1 & 2)" and lists
+implementation tips, and `ITripService.cs`/`IDestinationService.cs`'s interface doc
+comments still say "TODO (students): implement `TripService`/`DestinationService`" —
+all three types are fully implemented; only the comments are stale.
 
-**[Inferred]** The DTOs, entity comments, and controller routing show the intended
-behavior of the unimplemented parts: location autocomplete capped at 5 results,
-attractions capped at 20 per page within a default 20 km radius, trips with optional
-date ranges generating one `ItineraryDay` per date, an unscheduled "Saved Places"
-bucket (`ItineraryItem.ItineraryDayId == null`), per-day ordering via `SortOrder`, and
-a no-duplicate-destination-per-day rule. None of this logic exists in executable form;
-only the data shapes and DB constraints do.
+### 1.3 Cross-cutting conventions confirmed by the implementation
+
+**[Observed]** What §1.3 previously described as scaffolding-only intent is now real,
+executable behavior — see §3 for the full flow and §6 for the rule-by-rule table.
+In summary: location autocomplete is capped at 5 results and attractions at 20 per
+page within a caller-supplied radius (default 20 km, capped at 50 km); trips with a
+date range generate one `ItineraryDay` per date (regenerated whenever the range
+changes, via `TripService.RegenerateDays`); items with no day sit in an unscheduled
+"Saved Places" bucket (`ItineraryItem.ItineraryDayId == null`); per-bucket ordering via
+`SortOrder`, kept dense (0..n) by `TripService.Resequence`; and a destination cannot
+appear twice in the same day or twice in Saved Places, enforced both by the DB unique
+index and by an app-level check before insert.
 
 ### 1.4 Scope limitations
 
-- **[Observed]** No email sending, no refresh tokens, no roles/permissions, no caching
-  layer, no logging beyond default ASP.NET Core logging, no CI configuration, no
-  integration tests (a `public partial class Program` hook exists for
-  `WebApplicationFactory`, but no integration test project uses it).
-- **[Observed]** The frontend has no API wrappers or TypeScript types for trips or
-  destinations ([types.ts](frontend/src/types.ts) contains only `User` and
-  `AuthResponse` plus a student TODO).
+- **[Observed]** Still true: no refresh tokens (only a short-lived JWT access token
+  plus a separate purpose-scoped email-verification token — see §9's Authentication
+  details), no roles/permissions, no logging beyond default ASP.NET Core logging plus
+  one `ILogger.LogError` call for unhandled (500) exceptions, no CI configuration (no
+  `.github/workflows` or other CI config in the repo), no integration tests (a
+  `public partial class Program` hook exists for `WebApplicationFactory`, but no
+  integration test project uses it).
+- **[Observed]** No longer true: the frontend now has full API wrappers
+  (`api/destinations.ts`, `api/trips.ts` alongside `api/auth.ts`) and TypeScript types
+  for every DTO in [types.ts](frontend/src/types.ts); `DestinationService` now has an
+  in-process caching layer (`IMemoryCache`, cache-aside with stale-while-revalidate
+  fallback — see §3.2).
 
 ---
 
@@ -87,12 +110,13 @@ backend/
     TripPlanner.Infrastructure/    # EF Core, JWT, BCrypt, Geoapify client, migrations
     TripPlanner.WebApi/            # controllers, middleware, Program.cs, appsettings
   tests/
-    TripPlanner.Application.Tests/ # AuthServiceTests only
+    TripPlanner.Application.Tests/ # Auth/, Trips/, Destinations/, Repositories/, Identity/ — 5 classes, 77 tests
 frontend/
   src/
-    api/          # client.ts (axios + JWT interceptor), auth.ts
+    api/          # client.ts (axios + JWT interceptor + 401 logout interceptor),
+                  # auth.ts, destinations.ts, trips.ts
     auth/         # AuthContext.tsx, ProtectedRoute.tsx
-    features/     # auth/ (implemented), destinations/ & trips/ (stub pages)
+    features/     # auth/, destinations/, trips/ — all implemented
     types.ts, App.tsx, main.tsx, styles.css
 docker-compose.yml  # optional Postgres 17
 start-dev.bat / dev.ps1 / dev.sh
@@ -109,20 +133,26 @@ WebApi ──▶ Application ──▶ Domain
 ```
 
 - `TripPlanner.Domain` references **nothing** (no packages, no projects).
-- `TripPlanner.Application` references Domain + `Microsoft.EntityFrameworkCore`
-  (for `DbSet<T>` in `IApplicationDbContext`) + DI abstractions.
+- `TripPlanner.Application` references Domain + `FluentValidation.DependencyInjectionExtensions`
+  + `Microsoft.Extensions.Caching.Memory` + `Microsoft.Extensions.DependencyInjection.Abstractions`.
+  It does **not** reference `Microsoft.EntityFrameworkCore` at all (confirmed by grep — zero
+  matches in the `.csproj` or any `.cs` file under this project); the repository
+  abstractions it depends on (`IRepository<T>`, `IUnitOfWork`, `IUserRepository`,
+  `ITripRepository`, `IDestinationRepository`) are plain interfaces with no EF types
+  in their signatures.
 - `TripPlanner.Infrastructure` references Application; carries EF Core providers
-  (SQLite, Npgsql), JWT, BCrypt packages.
+  (SQLite, Npgsql), JWT, BCrypt packages, plus the repository implementations.
 - `TripPlanner.WebApi` references Application and Infrastructure; carries
-  JwtBearer, EF Design, Swashbuckle.
+  JwtBearer, EF Design, Swashbuckle, `DotNetEnv`.
 
 ### 2.3 Where business logic lives
 
-**[Observed]** All implemented business logic sits in the **Application layer**
-(`AuthService`), plus one domain method (`Trip.SetDates`) and DB-level constraints
-in Infrastructure entity configurations. Controllers are thin pass-throughs: they
-bind the request, call one service method, and wrap the result in `Ok(...)` /
-`CreatedAtAction(...)` / `NoContent()`. No business logic exists in controllers.
+**[Observed]** All business logic sits in the **Application layer** (`AuthService`,
+`DestinationService`, `TripService`), plus one domain method (`Trip.SetDates`) and
+DB-level constraints in Infrastructure entity configurations. Controllers are thin
+pass-throughs: they bind the request, call one service method, and wrap the result in
+`Ok(...)` / `CreatedAtAction(...)` / `NoContent()`. No business logic exists in
+controllers.
 
 ### 2.4 Separation of concerns
 
@@ -153,38 +183,85 @@ bind the request, call one service method, and wrap the result in `Ok(...)` /
 #### Register (`AuthService.RegisterAsync`)
 
 **Flow [Observed]:**
-1. Email is normalized: `Trim().ToLowerInvariant()` ([AuthService.cs:113](backend/src/TripPlanner.Application/Features/Auth/AuthService.cs:113)).
-2. Validation: email must be non-blank and contain `'@'`; password must be at least
-   **8 characters** (`MinPasswordLength = 8`). Failures accumulate into a
-   field→messages dictionary and throw `ValidationException` (→ HTTP 400).
-3. Uniqueness check: `Users.AnyAsync(u => u.Email == email)`. If taken, throws
+1. Validation runs **first**, via `RegisterRequestValidator` (FluentValidation): email
+   must be non-blank and contain `'@'`; password must be at least **8 characters**
+   (`RegisterRequestValidator.MinPasswordLength = 8`). Failures are converted by
+   `ValidateAndThrowAppExceptionAsync` into a field→messages dictionary and thrown as
+   `ValidationException` (→ HTTP 400).
+2. Email is normalized: `Trim().ToLowerInvariant()`
+   ([AuthService.cs:66](backend/src/TripPlanner.Application/Features/Auth/AuthService.cs:66),
+   `NormalizeEmail`).
+3. Uniqueness check: `IUserRepository.ExistsByEmailAsync(email)` (translates to
+   `Set.AnyAsync(u => u.Email == email)` inside `UserRepository`). If taken, throws
    `ConflictException` (→ 409) with the deliberately generic message
    *"Unable to register with the provided details."* — the comment states this avoids
    account enumeration.
 4. User is created with BCrypt password hash, trimmed `DisplayName` (blank → `null`),
-   and `IsEmailVerified = true` (explicitly a "template simplification").
-5. Saved via `SaveChangesAsync`; a JWT + `UserDto` is returned.
+   and `IsEmailVerified = false` — F4/US2, flipped to `true` only once the emailed
+   verification link is opened (`AuthService.cs:82`).
+5. Saved via `SaveChangesAsync`. A verification email is then sent
+   (`SendVerificationEmailAsync`) with a link to
+   `{FrontendBaseUrl}/verify-email?token=...`; **registration still succeeds even if
+   the email itself fails to send** (SMTP down/misconfigured is caught and swallowed —
+   see "Email verification" below) so a mail outage never blocks sign-up.
+6. A JWT + `UserDto` is returned — the caller is logged in immediately, before their
+   email is verified.
 
 **Edge cases handled [Observed]:** whitespace-only display name → null; mixed-case
-email → lowercased (asserted by `AuthServiceTests`).
+email → lowercased; SMTP failure during registration does not roll back the created
+account (all asserted by `AuthServiceTests`).
 
 **Edge cases NOT handled [Observed]:**
 - The email check `Contains('@')` accepts strings like `"a@"`; there is no full
   email-format validation.
 - Check-then-insert race: two concurrent registrations of the same email could both
-  pass `AnyAsync`; the DB unique index on `Users.Email` would then throw a raw
-  `DbUpdateException`, which the middleware maps to **500**, not 409. No catch/retry
-  exists in `AuthService`. [Inferred from the absence of any `DbUpdateException`
-  handling + the unique index in the migration]
+  pass `ExistsByEmailAsync`; the DB unique index on `Users.Email` would then cause
+  `UnitOfWork.SaveChangesAsync` to catch the resulting `DbUpdateException` and rethrow
+  it as `ConcurrencyException` (see §2.4) — but `AuthService.RegisterAsync` has no
+  `catch (ConcurrencyException)` block, so it propagates uncaught. `ConcurrencyException`
+  is not one of the types `ExceptionHandlingMiddleware` maps to a status code, so it
+  falls through to the generic **500** case, not 409. [Inferred from the absence of any
+  `ConcurrencyException` handling in `AuthService` + the unique index in the migration —
+  this is the same user-visible gap the original spec described, but the exception type
+  involved changed from a raw `DbUpdateException` to the repository layer's
+  `ConcurrencyException` after the Repository/UnitOfWork rewrite]
 - No password complexity rules beyond length; no maximum length; no rate limiting.
+
+#### Email verification (`AuthService.VerifyEmailAsync` / `ResendVerificationEmailAsync`)
+
+**Flow [Observed] (F4/US2):**
+1. `VerifyEmailAsync(token)` validates the token via
+   `IJwtTokenGenerator.ValidateEmailVerificationToken` — a JWT signed with the same key
+   as access tokens but issued for a **distinct audience**
+   (`{Audience}.email-verification`) and carrying a `purpose: email_verification`
+   claim, so a normal access token can never be replayed here and this token can never
+   authenticate against an `[Authorize]` endpoint. An invalid/expired/wrong-purpose
+   token throws `ValidationException` (→ 400) with a generic "invalid or expired" message.
+2. On a valid token the user is looked up by the id embedded in the token (404 if
+   somehow gone) and `IsEmailVerified` is flipped to `true` (idempotent — a second
+   verification of an already-verified user is a no-op, no extra save).
+3. `ResendVerificationEmailAsync` reads the **current authenticated user**
+   (`[Authorize]` on the controller action) and resends the same email; if the user is
+   already verified it silently no-ops rather than sending anything.
+4. Both the register-time send and the resend share `SendVerificationEmailAsync`,
+   which swallows `SmtpException`/`SocketException` (transient mail failures) so a
+   flaky/unconfigured SMTP relay never surfaces as an error to the caller.
+
+**Edge cases NOT handled [Observed]:** `LoginAsync` never checks `IsEmailVerified` — an
+unverified user can log in and use the app normally (a deliberate product decision,
+asserted by `AuthServiceTests.LoginAsync_WithUnverifiedEmail_StillReturnsToken`); the
+frontend nudges with a dismissible banner instead of blocking. `SmtpEmailSender` is a
+no-op (returns without sending or throwing) when `Smtp:User`/`Smtp:AppPassword` are
+unconfigured, so a fresh clone with no `.env` silently sends no verification emails at
+all — registration and the UI both behave as if it succeeded.
 
 #### Login (`AuthService.LoginAsync`)
 
-**Flow [Observed]:** normalize email → `FirstOrDefaultAsync` by email → if user is
+**Flow [Observed]:** normalize email → `GetByEmailAsync` → if user is
 missing **or** `BCrypt.Verify` fails, throw `UnauthorizedException("Invalid email or
 password.")` (→ 401). The error message is identical for both failure modes
 (anti-enumeration, per code comment). On success returns `AuthResponse(AccessToken,
-ExpiresAt, UserDto)`.
+ExpiresAt, UserDto)` regardless of `IsEmailVerified`.
 
 **Edge case NOT handled [Observed]:** when the user does not exist, no dummy hash
 verification is performed — the code comment itself notes it "short-circuits for
@@ -203,33 +280,181 @@ remain valid until expiry.
 and the user object under `localStorage["tripplanner.user"]`. An axios request
 interceptor in [client.ts](frontend/src/api/client.ts) attaches
 `Authorization: Bearer <token>` to every request when a token exists.
-**[Observed gap]** Nothing checks `expiresAt`; an expired token stays in storage and
-the UI still treats the user as authenticated until an API call returns 401 — and
-there is no 401 response interceptor to force logout.
 
-### 3.2 Feature 1 & 2 — Destinations (STUB)
+**[Observed] No longer a gap:** `client.ts` now has a **response interceptor** too — a
+401 on any request that was carrying a token (i.e. not a failed login/register, which
+also 401s but never had a token to expire) clears the stored token/user and dispatches
+a `tripplanner:auth-logout` `window` event; `AuthContext` listens for that event and
+clears its in-memory session, so an expired/revoked JWT now forces a logout on the next
+API call instead of leaving the UI stuck showing an authenticated user.
+**[Observed gap, still true]** Nothing proactively checks `expiresAt` client-side — the
+stale-session detection is still reactive (only fires once some API call actually
+returns 401), not a timer or a pre-flight check before the token's known expiry.
 
-**[Observed]** `DestinationService.SearchLocationsAsync`, `GetAttractionsAsync`, and
-`GetDetailsAsync` each immediately throw `NotImplementedException` with a message
-pointing at the assignment user story. `GeoapifyClient` (the `IDestinationProvider`
-implementation) likewise throws from all three methods. Calling any
-`/api/destinations/*` endpoint therefore returns **501 Not Implemented** with a
-ProblemDetails body. No query validation, no result capping, no caching exists —
-these are TODO comments only.
+### 3.2 Feature 1 & 2 — Destinations (IMPLEMENTED)
 
-### 3.3 Feature 3 — Trips (STUB)
+`DestinationService` ([DestinationService.cs](backend/src/TripPlanner.Application/Features/Destinations/DestinationService.cs))
+implements search, attractions, and details over `IDestinationProvider`
+(`GeoapifyClient`) plus an `IImageSearchProvider` (`SerperImageClient`, Serper's Google
+Images proxy) for thumbnails, fronted by an in-process `IMemoryCache`.
 
-**[Observed]** All six `TripService` methods (`GetMyTripsAsync`, `GetTripAsync`,
-`CreateTripAsync`, `UpdateTripAsync`, `AddDestinationAsync`,
-`RemoveDestinationAsync`) throw `NotImplementedException`. Every `/api/trips`
-endpoint returns **401** without a valid JWT (controller-level `[Authorize]`) or
-**501** with one.
+#### Search locations (`SearchLocationsAsync`) — F1/US1-US2
 
-**[Observed]** The only executable Feature-3 business rule is
-`Trip.SetDates(startDate, endDate)` in the Domain layer, which throws
-`DomainException` when both dates are set and `start > end`
-([Trip.cs:29](backend/src/TripPlanner.Domain/Entities/Trip.cs:29)). Nothing currently
-calls it (the intended caller, `TripService.UpdateTripAsync`, is a stub).
+**Flow [Observed]:**
+1. Trim the query; validate via `SearchLocationsRequestValidator` — non-empty, **≥ 2
+   characters** — throwing `ValidationException` (→ 400) otherwise.
+2. Cache-aside on the lowercased, trimmed query (`loc:{query}`, 24 h TTL): a fresh hit
+   skips the provider call entirely.
+3. On a miss, call `GeoapifyClient.SearchLocationsAsync` (Geoapify autocomplete,
+   `type=city`/`country` results only), then **dedupe** by `(name, country)`,
+   **rank** exact match → prefix match → everything else (`RelevanceRank`), and
+   **cap at 5** (`MaxLocationResults`).
+
+**Edge cases handled [Observed]:** case-insensitive cache key and dedupe key so
+"Paris"/"paris" share one cache entry and one result set.
+**Edge cases NOT handled [Observed]:** no rate limiting on repeated distinct queries
+(each new query string is a fresh, paid Geoapify call once its cache entry is cold).
+
+#### Attractions (`GetAttractionsAsync`) — F1/US3
+
+**Flow [Observed]:**
+1. Validate via `GetAttractionsRequestValidator` — latitude ∈ [-90, 90], longitude ∈
+   [-180, 180], `0 < radiusKm ≤ 50` — throwing `ValidationException` otherwise.
+2. Cache-aside keyed by coordinates rounded to ~3 decimals (~100 m) and the radius, 6 h
+   TTL.
+3. On a miss, call `GeoapifyClient.GetAttractionsAsync` (categories broadened past the
+   spec's minimum to include parks/nature/religion/heritage/entertainment, capped at
+   20 via Geoapify's own `limit`), rank by rating descending with unrated last (a
+   no-op today since Geoapify never returns a rating), cap at 20
+   (`MaxAttractionResults`), **then** enrich each result's `ImageUrl` via Serper —
+   ranking/capping happens *before* enrichment so image-search calls (a paid API) are
+   only ever spent on the ≤20 results actually returned.
+4. Image enrichment (`EnrichWithImagesAsync`) runs up to 5 lookups
+   (`ImageFetchConcurrency`) in parallel; one failed lookup only leaves that one
+   attraction imageless, it never fails the whole list.
+
+**Edge cases handled [Observed]:** a Geoapify/Serper outage (`HttpRequestException`,
+`TaskCanceledException`, or an unparseable JSON body) falls back to a stale cache entry
+if one exists ("stale-better-than-down"), rather than failing the request; stale
+entries are retained up to 7 days (`CacheRetention`) past their TTL specifically to
+serve as that fallback.
+**Edge cases NOT handled [Observed]:** no server-side category/rating filter or
+sort-order parameter — the endpoint only supports the "recommended" default sort;
+per `AttractionsList.tsx:15-16`, filtering/sorting the ≤20 already-loaded results by
+category/rating is a deliberate **frontend-only** concern (US4/US5), not a gap.
+
+#### Details (`GetDetailsAsync`) — F2/US1-US2
+
+**Flow [Observed]:**
+1. Validate a non-empty `providerId` (`GetDestinationDetailsRequestValidator`).
+2. Cache-aside on `details:{providerId}` (24 h TTL, provider-first): a **null**
+   provider answer is deliberately never cached, so a transient "not found" doesn't
+   stick around for the TTL.
+3. If the provider has the place, fetch/attach a photo gallery of up to 5 images
+   (`DetailsPhotoCount`) via the same Serper cache entry the attractions list uses
+   (`imgs:{providerId}`), so the same place shows a consistent primary photo on both
+   the list and its own details page.
+4. **If the provider itself doesn't know the id** (a saved-trip destination the
+   provider has since removed/renamed), falls back to the local `Destination` cache
+   row via `IDestinationRepository.GetByProviderIdReadOnlyAsync` — only a miss on
+   **both** the live provider and the local cache is `NotFoundException` (→ 404).
+
+**Edge cases handled [Observed]:** provider unreachable but a stale entry exists →
+serve stale rather than fail; provider 400/404 for an unrecognized id is treated as "no
+such place" (`GeoapifyClient` maps both to a `null` return, not an exception).
+**[Observed]** `DestinationService` never writes to the database itself — the comment
+on the class and on `GetOrCreateDestinationAsync` are explicit that only
+`TripService.AddDestinationAsync` upserts a `Destination` row, on first add to any trip.
+
+### 3.3 Feature 3 — Trips (IMPLEMENTED)
+
+`TripService` ([TripService.cs](backend/src/TripPlanner.Application/Features/Trips/TripService.cs))
+implements all seven `ITripService` methods. Every method resolves the caller via
+`ICurrentUserService.GetRequiredUserId()` (throws `UnauthorizedException` → 401 when
+anonymous) and filters every query by that id — "someone else's trip" and "no such
+trip" are indistinguishable to the caller, both surfacing as 404 (NFR 6).
+
+#### List / get (`GetMyTripsAsync`, `GetTripAsync`)
+
+**[Observed]** `GetMyTripsAsync` projects a lightweight `TripSummaryRow` per trip
+(`ITripRepository.GetSummaryRowsForUserAsync`, translated to SQL so
+`DestinationCount`/cover photo are computed by the query, not by loading every item),
+then sorts by `CreatedAt` descending **in memory** — the code comment explains SQLite
+cannot `ORDER BY` a `DateTimeOffset` column in SQL. `GetTripAsync` loads the full graph
+read-only (`Days.Items.Destination` + `Items.Destination`) filtered by
+`(tripId, userId)`; a trip that exists but belongs to someone else is `NotFoundException`,
+same as a nonexistent id.
+
+#### Create / update (`CreateTripAsync`, `UpdateTripAsync`) — F3/US1-US2
+
+**Flow [Observed]:**
+1. `CreateTripAsync` validates a non-blank, ≤100-char name (`CreateTripRequestValidator`),
+   trims it, and assigns `UserId` from the current user — never from client input.
+2. `UpdateTripAsync` validates name + an absurd-range guard (`UpdateTripRequestValidator`:
+   a date range, if both ends are set, must be **under 365 days**), then calls
+   `Trip.SetDates(start, end)` — the **only** place that enforces start ≤ end, so the
+   validator deliberately does not duplicate that check.
+3. **Day regeneration** (`TripService.RegenerateDays`, F3/US2): computes the target set
+   of dates from the new range; days whose date fell out of range are removed (their
+   items' `ItineraryDayId` is set to `null` in memory, mirroring the DB's `SetNull`
+   cascade, so the returned DTO already reflects the move to Saved Places); days for
+   new dates in range are created; days still in range are **preserved** (their
+   scheduled items are untouched); all days are then renumbered `DayNumber` 1..n in
+   date order. Explicit `_itineraryDays.Add(day)`/`Remove(day)` calls are required
+   because `BaseEntity` self-assigns its `Guid` key client-side, which would otherwise
+   make EF Core's change-tracker misclassify a brand-new day as an existing row to
+   `UPDATE`.
+
+#### Add a destination (`AddDestinationAsync`) — F3/US3-US4/US6
+
+**Flow [Observed]:**
+1. Validate a non-empty `ProviderId` (`AddDestinationRequestValidator`); if
+   `ItineraryDayId` is supplied, `EnsureDayBelongsToTripAsync` checks it belongs to
+   *this* trip (→ `ValidationException` on the `ItineraryDayId` field otherwise).
+2. **Upsert-on-first-add** (`GetOrCreateDestinationAsync`, spec §11.0-6): look up the
+   `Destination` cache row by `ProviderId`; on a cache miss, fetch full details from
+   `IDestinationProvider` (404 if the provider itself doesn't know the id), map to a
+   new `Destination` entity, best-effort fill `ImageUrl` via Serper if the provider had
+   none, and insert. A fresh `ProviderId` is the **normal** case, not an error — this
+   path never assumes the destination must already exist.
+3. **Duplicate check** (US4/US6): a destination already present in the *same* bucket
+   (same day, or both in Saved Places) throws `ConflictException` (→ 409) with a
+   user-facing message, checked both in memory before the save **and** by catching
+   `ConcurrencyException` after the save (the DB unique index
+   `(ItineraryDayId, DestinationId)` is the final authority under concurrent requests —
+   see §2.4/§6).
+4. New items get the next `SortOrder` in their bucket (`bucket.Max(...) + 1`, or 0 if
+   the bucket is empty).
+5. The `Destination` upsert has its **own** concurrency handling: if a concurrent
+   request wins the race to insert the same `ProviderId` first, `GetOrCreateDestinationAsync`
+   discards its own in-memory copy and re-fetches the winner's row rather than erroring.
+
+#### Schedule / reorder / move (`UpdateItineraryItemAsync`) — F3/US4-US6
+
+**Flow [Observed]:** the single endpoint behind drag-and-drop. Validates
+`SortOrder ≥ 0` (`UpdateItineraryItemRequestValidator`); resolves the target day (null
+= Saved Places) via the same `EnsureDayBelongsToTripAsync` check; the duplicate check
+excludes the item being moved itself (so reordering within the same day/bucket is
+always allowed); inserts the item at the requested position within the target
+bucket's list (clamped — "position 99" on a 3-item bucket means "last") and calls
+`Resequence` to renumber that bucket's `SortOrder` values densely (0..n); if the item
+moved **between** buckets, the bucket it left is also resequenced to close the gap it
+left behind. Both bucket updates commit in a **single** `SaveChangesAsync` call so a
+cross-day move is atomic.
+
+#### Remove a destination (`RemoveDestinationAsync`)
+
+**[Observed]** `ITripRepository.GetOwnedItemAsync` fetches the item only if it belongs
+to a trip owned by the caller (NFR 6) — otherwise `NotFoundException`. Leaves gaps in
+`SortOrder` after removal, which is harmless since ordering is only ever relative.
+
+#### The one Domain-layer rule
+
+**[Observed]** `Trip.SetDates(startDate, endDate)`
+([Trip.cs:29](backend/src/TripPlanner.Domain/Entities/Trip.cs:29)) throws
+`DomainException` when both dates are set and `start > end`; it is now actively called
+from `TripService.UpdateTripAsync` (previously unreachable when `UpdateTripAsync` was
+a stub).
 
 ---
 
@@ -239,12 +464,14 @@ All endpoints are attribute-routed controllers under `api/[controller]`.
 All error responses are `application/problem+json` (RFC 7807 `ProblemDetails`)
 produced by [ExceptionHandlingMiddleware](backend/src/TripPlanner.WebApi/Middleware/ExceptionHandlingMiddleware.cs). [Observed]
 
-### 4.1 AuthController — `api/auth` (anonymous, fully functional)
+### 4.1 AuthController — `api/auth` (fully functional)
 
-| Route | Method | Request body | Success response | Error responses |
-|---|---|---|---|---|
-| `/api/auth/register` | POST | `RegisterRequest { email: string, password: string, displayName?: string }` | **200 OK** `AuthResponse { accessToken, expiresAt, user: { id, email, displayName } }` | **400** validation (bad email / password < 8 chars, with `errors` dictionary extension); **409** email already registered |
-| `/api/auth/login` | POST | `LoginRequest { email: string, password: string }` | **200 OK** `AuthResponse` (same shape) | **401** "Invalid email or password." |
+| Route | Method | Auth | Request body | Success response | Error responses |
+|---|---|---|---|---|---|
+| `/api/auth/register` | POST | anonymous | `RegisterRequest { email, password, displayName? }` | **200 OK** `AuthResponse { accessToken, expiresAt, user: { id, email, displayName, isEmailVerified } }` | **400** validation (bad email / password < 8 chars, with `errors` dictionary extension); **409** email already registered |
+| `/api/auth/login` | POST | anonymous | `LoginRequest { email, password }` | **200 OK** `AuthResponse` (same shape) | **401** "Invalid email or password." |
+| `/api/auth/verify-email` | POST | anonymous | `VerifyEmailRequest { token }` | **200 OK** (no body) | **400** invalid/expired/wrong-purpose token |
+| `/api/auth/resend-verification` | POST | **`[Authorize]`** | — | **200 OK** (no body; also 200 when already verified — a silent no-op) | **401** anonymous |
 
 Notes [Observed]:
 - Register returns **200**, not 201 (`Ok(response)` in the controller; the
@@ -252,31 +479,31 @@ Notes [Observed]:
 - `[ApiController]` is present, so ASP.NET Core's automatic model-state validation
   applies to request binding; however the request DTOs carry **no DataAnnotations**,
   so in practice only malformed JSON / type mismatches produce the framework's
-  automatic 400. [Inferred from `[ApiController]` + absence of annotations]
+  automatic 400 — the real 400s for register come from FluentValidation via
+  `RegisterRequestValidator`. [Inferred from `[ApiController]` + absence of annotations]
 
-### 4.2 DestinationsController — `api/destinations` (anonymous, stubbed)
+### 4.2 DestinationsController — `api/destinations` (anonymous, fully functional)
 
-| Route | Method | Parameters | AS-IS response |
-|---|---|---|---|
-| `/api/destinations/locations` | GET | `query` (string, from query) | **501** ProblemDetails "Not implemented yet" |
-| `/api/destinations/attractions` | GET | `lat` (double), `lng` (double), `radiusKm` (double, default **20**) | **501** |
-| `/api/destinations/{providerId}` | GET | `providerId` (string, route) | **501** |
+| Route | Method | Parameters | Success response | Error responses |
+|---|---|---|---|---|
+| `/api/destinations/locations` | GET | `query` (string, from query) | **200 OK** `IReadOnlyList<LocationSuggestionDto>` (≤5, ranked) | **400** query missing or < 2 chars |
+| `/api/destinations/attractions` | GET | `lat` (double), `lng` (double), `radiusKm` (double, default **20**) | **200 OK** `IReadOnlyList<DestinationSummaryDto>` (≤20, images enriched) | **400** lat/lng out of range, or radius ≤ 0 / > 50 km |
+| `/api/destinations/{providerId}` | GET | `providerId` (string, route) | **200 OK** `DestinationDetailsDto` (with `imageUrls` gallery) | **400** blank providerId; **404** unknown to both the provider and the local cache |
 
-Declared (unreachable) success types: `IReadOnlyList<LocationSuggestionDto>`,
-`IReadOnlyList<DestinationSummaryDto>`, `DestinationDetailsDto`. No `[Authorize]` —
-the controller comment says these are deliberately public so users can browse before
-logging in. [Observed]
+No `[Authorize]` — the controller's XML doc comment states these are deliberately
+public so users can browse before logging in (F3/US8). [Observed]
 
-### 4.3 TripsController — `api/trips` (`[Authorize]` on the controller, stubbed)
+### 4.3 TripsController — `api/trips` (`[Authorize]` on the controller, fully functional)
 
-| Route | Method | Request | AS-IS response (with valid JWT) |
-|---|---|---|---|
-| `/api/trips` | GET | — | **501** |
-| `/api/trips/{tripId:guid}` | GET | — | **501** |
-| `/api/trips` | POST | `CreateTripRequest { name }` | **501** (would be **201 CreatedAtAction** if implemented — the controller already wraps the result) |
-| `/api/trips/{tripId:guid}` | PUT | `UpdateTripRequest { name, startDate?, endDate? }` | **501** |
-| `/api/trips/{tripId:guid}/destinations` | POST | `AddDestinationRequest { providerId, itineraryDayId? }` | **501** |
-| `/api/trips/{tripId:guid}/destinations/{itemId:guid}` | DELETE | — | **501** (would be **204 NoContent**) |
+| Route | Method | Request | Success response | Error responses |
+|---|---|---|---|---|
+| `/api/trips` | GET | — | **200 OK** `IReadOnlyList<TripSummaryDto>` (caller's trips, newest first) | — |
+| `/api/trips/{tripId:guid}` | GET | — | **200 OK** `TripDetailDto` (days + Saved Places) | **404** not found / not owned by caller |
+| `/api/trips` | POST | `CreateTripRequest { name }` | **201 Created** (`CreatedAtAction` → `GetTrip`) `TripSummaryDto` | **400** blank/too-long name |
+| `/api/trips/{tripId:guid}` | PUT | `UpdateTripRequest { name, startDate?, endDate? }` | **200 OK** `TripDetailDto` (days regenerated) | **400** blank name, range > 365 days, or start > end; **404** not found/not owned |
+| `/api/trips/{tripId:guid}/destinations` | POST | `AddDestinationRequest { providerId, itineraryDayId? }` | **200 OK** `TripDestinationDto` | **400** blank providerId, or day not in this trip; **404** trip not found/not owned, or provider doesn't know the id; **409** duplicate in that bucket |
+| `/api/trips/{tripId:guid}/destinations/{itemId:guid}` | PUT | `UpdateItineraryItemRequest { itineraryDayId?, sortOrder }` | **200 OK** `TripDestinationDto` | **400** negative sortOrder, or day not in this trip; **404** trip/item not found/not owned; **409** duplicate in target bucket |
+| `/api/trips/{tripId:guid}/destinations/{itemId:guid}` | DELETE | — | **204 No Content** | **404** trip/item not found/not owned |
 
 Without a valid JWT every route returns **401** (JWT bearer default challenge).
 Non-GUID `tripId`/`itemId` values fail the `:guid` route constraint → **404**.
@@ -314,21 +541,38 @@ enforcement** — entities are mutable classes with public setters. [Observed]
 
 ### 5.2 DTOs (Application layer, C# records)
 
-- **Auth:** `RegisterRequest`, `LoginRequest`, `UserDto`, `AuthResponse` — the
-  password hash never appears in any DTO. [Observed]
-- **Destinations:** `LocationSuggestionDto`, `DestinationSummaryDto` (includes
-  `Rating` — a field that does **not** exist on the `Destination` entity),
-  `DestinationDetailsDto`.
+- **Auth:** `RegisterRequest`, `LoginRequest`, `UserDto` (now includes
+  `IsEmailVerified`), `VerifyEmailRequest`, `AuthResponse` — the password hash never
+  appears in any DTO. [Observed]
+- **Destinations:** `LocationSuggestionDto`, `DestinationSummaryDto` (still includes
+  `Rating` — a field that does **not** exist on the `Destination` entity; it is
+  populated straight from a live provider call and is always `null` for Geoapify,
+  never persisted), `DestinationDetailsDto` (now also carries `ImageUrls` — the F2/US2
+  photo gallery, defaulted to `null`/empty and populated by `DestinationService`, not
+  the provider client directly). Three small wrapper records
+  (`SearchLocationsRequest`, `GetAttractionsRequest`, `GetDestinationDetailsRequest`)
+  exist purely so each has its own FluentValidation validator.
 - **Trips:** `CreateTripRequest`, `UpdateTripRequest`, `AddDestinationRequest`,
-  `TripSummaryDto` (with computed `DestinationCount`), `TripDestinationDto`,
+  `UpdateItineraryItemRequest` (F3/US4-US6 — schedule/reorder/move), `TripSummaryDto`
+  (with computed `DestinationCount` and `CoverImageUrl`), `TripDestinationDto`,
   `ItineraryDayDto`, `TripDetailDto` (days + separate `SavedPlaces` list).
 
-Mapping is manual (constructor calls in `AuthService`); no AutoMapper. [Observed]
+**[Observed]** Mapping is no longer manual/inline — each feature folder has a
+centralized `*Mappings.cs` static class (`AuthMappings.ToDto`, `DestinationMappings.ToEntity`/`ToDetailsDto`,
+`TripMappings.ToSummaryDto`/`ToDestinationDto`/`ToDayDto`/`ToDetailDto`) that every
+service call site goes through; no AutoMapper. `TripMappings` additionally exposes a
+compiled `Expression<Func<Trip, TripSummaryRow>>` (`ToSummaryRowExpression`) so the
+trip-list projection translates to SQL (a correlated subquery for `DestinationCount`
+and cover photo) while the in-memory `ToSummaryDto` extension is compiled from that
+*same* expression — the two can never drift apart.
 
 ### 5.3 Frontend types
 
-**[Observed]** Only `User` and `AuthResponse` exist in
-[types.ts](frontend/src/types.ts); trip/destination types are an explicit student TODO.
+**[Observed]** [types.ts](frontend/src/types.ts) now covers every DTO consumed by the
+feature pages: `User`, `AuthResponse`, `LocationSuggestion`, `AttractionSummary`,
+`DestinationDetails`, `TripSummary`, `TripDestination`, `ItineraryDay`, `TripDetail`.
+`api/destinations.ts` and `api/trips.ts` are thin typed wrappers over `apiClient`
+following `api/auth.ts`'s pattern — no raw `fetch`/`axios` calls remain in components.
 
 ---
 
@@ -338,36 +582,49 @@ Mapping is manual (constructor calls in `AuthService`); no AutoMapper. [Observed
 
 | # | Rule | Where enforced | HTTP effect |
 |---|---|---|---|
-| B1 | Password ≥ 8 characters | `AuthService.ValidateRegistration` (constant `MinPasswordLength`) | 400 |
+| B1 | Password ≥ 8 characters | `RegisterRequestValidator` (constant `MinPasswordLength`) | 400 |
 | B2 | Email must be non-blank and contain `@` | same | 400 |
 | B3 | Emails are stored/compared lowercase + trimmed | `AuthService.NormalizeEmail` | — |
-| B4 | Email must be unique | `AuthService` pre-check (409) **and** unique DB index `IX_Users_Email` | 409 (app) / 500 (index race, unhandled) |
+| B4 | Email must be unique | `AuthService` pre-check (409) **and** unique DB index `IX_Users_Email` | 409 (app) / 500 (race — `ConcurrencyException` from `UnitOfWork` is uncaught in `AuthService`, so it isn't translated to 409; see §3.1) |
 | B5 | Auth failure messages never reveal whether an account exists | generic messages in Register (409) and Login (401) | — |
 | B6 | Passwords stored only as BCrypt hashes (salt embedded) | `BCryptPasswordHasher` | — |
-| B7 | Trip start date must be ≤ end date (when both set) | `Trip.SetDates` throws `DomainException` | 400 — **currently unreachable** (no caller) |
-| B8 | A destination cannot appear twice in the same itinerary day | unique DB index `IX_ItineraryItems_ItineraryDayId_DestinationId` | DB-level only; no app-level handling exists |
-| B9 | One cached `Destination` row per external place | unique DB index `IX_Destinations_ProviderId` | DB-level only |
+| B7 | Trip start date must be ≤ end date (when both set) | `Trip.SetDates` throws `DomainException`, called from `TripService.UpdateTripAsync` | 400 |
+| B8 | A destination cannot appear twice in the same itinerary day (or twice in Saved Places) | app-level check in `TripService.AddDestinationAsync`/`UpdateItineraryItemAsync` (409) **and** unique DB index `IX_ItineraryItems_ItineraryDayId_DestinationId` as the concurrency backstop (`ConcurrencyException` → `ConflictException`) | 409 (both paths) |
+| B9 | One cached `Destination` row per external place | app-level upsert in `TripService.GetOrCreateDestinationAsync` **and** unique DB index `IX_Destinations_ProviderId` as the concurrency backstop (loser discards its row and re-fetches the winner's) | — (transparent to the caller — no error surfaces) |
 | B10 | Deleting a user cascades to trips; deleting a trip cascades to its days and items | FK delete behaviors (Cascade) | — |
-| B11 | Deleting an itinerary day returns its items to "Saved Places" (FK set to NULL), it does not delete them | `ItineraryDayConfiguration` `DeleteBehavior.SetNull` | — |
-| B12 | A `Destination` cannot be deleted while referenced by any itinerary item | `DeleteBehavior.Restrict` on `ItineraryItem.DestinationId` | — |
+| B11 | Deleting an itinerary day returns its items to "Saved Places" (FK set to NULL), it does not delete them | `ItineraryDayConfiguration` `DeleteBehavior.SetNull`; mirrored in memory by `TripService.RegenerateDays` when a day falls out of a shortened date range | — |
+| B12 | A `Destination` cannot be deleted while referenced by any itinerary item | `DeleteBehavior.Restrict` on `ItineraryItem.DestinationId` | — (no code path deletes a `Destination` today, so this is currently unreachable rather than exercised) |
 | B13 | `UpdatedAt` is stamped automatically on modified entities at save time | `ApplicationDbContext.SaveChangesAsync` override | — |
 | B14 | JWT tokens expire after `Jwt:ExpiryMinutes` (config default 60) with zero clock skew | `JwtTokenGenerator` + `TokenValidationParameters.ClockSkew = TimeSpan.Zero` | 401 after expiry |
-| B15 | Users are created already email-verified | `IsEmailVerified = true` in `RegisterAsync` | — |
+| B15 | Users are created unverified; a purpose-scoped, 24h-expiring token flips `IsEmailVerified` once | `IsEmailVerified = false` in `RegisterAsync`; `AuthService.VerifyEmailAsync` + `JwtTokenGenerator.{Generate,Validate}EmailVerificationToken` | — |
+| B16 | A trip's date range, if both ends are set, must be under 365 days | `UpdateTripRequestValidator` | 400 |
+| B17 | Search queries must be ≥ 2 characters; attraction radius must be in `(0, 50]` km; latitude/longitude must be on the globe | `SearchLocationsRequestValidator` / `GetAttractionsRequestValidator` | 400 |
+| B18 | `SortOrder` within a bucket (day or Saved Places) is kept dense (0..n) after any add/reorder/move/remove | `TripService.Resequence`, called from `UpdateItineraryItemAsync` — **not** a DB constraint (no unique index on `SortOrder`; see §8.4) | — |
+| B19 | Trip list/detail/add/remove/reorder are all scoped to the caller (NFR 6) | every `TripService` method resolves `userId` via `ICurrentUserService.GetRequiredUserId()` and every repository query filters by it (`ITripRepository.GetSummaryRowsForUserAsync`/`GetDetailsAsync`/`GetTrackedWithFullGraphAsync`/`GetOwnedItemAsync`) | 401 anonymous; 404 for someone else's trip (indistinguishable from "doesn't exist") |
+| B20 | Provider/browse results are cached (cache-aside, `IMemoryCache`) with TTLs of 24h (locations, details), 6h (attractions), and stale-while-revalidate fallback on a provider outage | `DestinationService.GetCachedAsync`/`GetCachedProviderDetailsAsync`/`GetAttractionImagesAsync` | — |
 
-### 6.2 Inferred behavior
+### 6.2 Inferred / partially-enforced behavior
 
-- **[Inferred]** B8/B9/B11/B12 exist *only* as database constraints; since the services
-  that would exercise them are stubs, violating them via future code would surface as
-  an unhandled `DbUpdateException` → HTTP 500 under the current middleware mapping.
-- **[Inferred]** The per-user authorization rule ("users only see their own trips",
-  NFR 6) is *declared* in interface/entity comments and supported by `ICurrentUserService`,
-  but no executable filter exists anywhere — it is a contract for future code, not a rule
-  the system currently enforces beyond the `[Authorize]` attribute.
+- **[Observed]** B8/B9/B11/B12's DB constraints are now actually exercised by live
+  code paths (Repository/UnitOfWork rewrite means a unique-index violation surfaces as
+  the EF-agnostic `ConcurrencyException`, not a raw `DbUpdateException`); B8 and B9 are
+  each backed by an app-level check *as well*, so the DB index is a concurrency
+  backstop rather than the sole enforcement — see §3.3 and B4/B8/B9 above.
+- **[Observed]** The per-user authorization rule (NFR 6) is no longer just declared in
+  comments — every `TripService` method resolves `userId` and every repository query
+  used by a write or a scoped read filters by it (B19). This contradicts what the
+  original version of this document claimed ("a contract for future code, not a rule
+  the system currently enforces") — that claim is now false.
 - **[Inferred]** `ICurrentUserService.IsAuthenticated` is a default interface member
   (`UserId is not null`); `CurrentUserService` reads the user id from the
   `ClaimTypes.NameIdentifier` claim first, falling back to the raw `"sub"` claim —
   the fallback exists because the JWT handler's default inbound claim mapping renames
-  `sub` to `ClaimTypes.NameIdentifier`.
+  `sub` to `ClaimTypes.NameIdentifier`. `JwtTokenGenerator.ValidateEmailVerificationToken`
+  deliberately sets `MapInboundClaims = false` on its own handler instance so it can read
+  the raw `sub`/`purpose` claims without that same rename getting in the way.
+- **[Inferred]** B18 (dense `SortOrder`) is an in-memory-only invariant — nothing in the
+  database prevents two rows in the same bucket from sharing a `SortOrder` value if a
+  future code path writes one directly instead of going through `TripService`.
 
 ---
 
@@ -380,34 +637,84 @@ Mapping is manual (constructor calls in `AuthService`); no AutoMapper. [Observed
    JSON/unbindable values only, because **no DataAnnotations exist on any DTO**.
    (The `required` properties on entities are C# compile-time `required` modifiers,
    not validation attributes.)
-3. **Manual service-layer validation** — the only substantive validation in the
-   system: `AuthService.ValidateRegistration` (email shape, password length) throwing
-   `ValidationException` with a field-error dictionary.
-4. **Domain validation** — `Trip.SetDates` (currently uncalled).
-5. **Database constraints** — required columns, max lengths (`Email` 256,
+3. **FluentValidation, one `AbstractValidator<T>` per request DTO that needs it** —
+   this is now the primary validation layer, registered in bulk via
+   `services.AddValidatorsFromAssembly(...)` in
+   [Application/DependencyInjection.cs](backend/src/TripPlanner.Application/DependencyInjection.cs)
+   and invoked at the top of every service method via the
+   `IValidator<T>.ValidateAndThrowAppExceptionAsync` extension
+   ([ValidationExtensions.cs](backend/src/TripPlanner.Application/Common/Validation/ValidationExtensions.cs)),
+   which bridges FluentValidation's own result type into this project's
+   `Exceptions.ValidationException` (field → messages dictionary, → HTTP 400):
+   - `RegisterRequestValidator` — email non-blank + contains `@`; password ≥ 8 chars.
+   - `SearchLocationsRequestValidator` — query non-blank, ≥ 2 chars.
+   - `GetAttractionsRequestValidator` — lat/lng on the globe; `0 < radiusKm ≤ 50`.
+   - `GetDestinationDetailsRequestValidator` — providerId non-blank.
+   - `CreateTripRequestValidator` — name non-blank, ≤ 100 chars.
+   - `UpdateTripRequestValidator` — name non-blank/≤ 100 chars; range < 365 days
+     (start ≤ end is deliberately **not** duplicated here — see item 4 below).
+   - `AddDestinationRequestValidator` — providerId non-blank.
+   - `UpdateItineraryItemRequestValidator` — `SortOrder ≥ 0`.
+
+   `LoginRequest` has **no** validator — login failure is intentionally reported
+   generically via `UnauthorizedException`, not per-field validation (see §3.1).
+4. **Manual service-layer validation** — checks that need the database and so cannot
+   live in a stateless validator: `AuthService`'s email-uniqueness check (409, not
+   400), `TripService.EnsureDayBelongsToTripAsync` (a supplied `ItineraryDayId` must
+   belong to the target trip), and the duplicate-destination-per-bucket checks in
+   `AddDestinationAsync`/`UpdateItineraryItemAsync`.
+5. **Domain validation** — `Trip.SetDates` (start ≤ end), now actively called from
+   `TripService.UpdateTripAsync`.
+6. **Database constraints** — required columns, max lengths (`Email` 256,
    `DisplayName` 100, `Trip.Name` 200, `Destination.ProviderId` 128 / `Name` 300 /
    `Category` 200 / `ImageUrl` & `Website` 2048), unique indexes (B4, B8, B9),
    FK delete behaviors.
 
-**Not present [Observed]:** FluentValidation, action filters, custom model binders,
-any validation on `LoginRequest`, `CreateTripRequest`, `UpdateTripRequest`,
-`AddDestinationRequest`, or on destination query parameters.
+**Not present [Observed]:** action filters, custom model binders, DataAnnotations on
+any DTO.
 
 **Frontend validation [Observed]:** HTML-native only — `type="email"`, `required`,
-and `minLength={8}` on the register password input.
+and `minLength={8}` on the register password input; the destinations/trips forms rely
+on the backend's 400 responses (surfaced via `getErrorMessage`) rather than
+client-side validation.
 
 ---
 
 ## 8. Database Layer
 
-### 8.1 DbContext
+### 8.1 DbContext, repositories, and Unit of Work
 
 **[Observed]** [ApplicationDbContext](backend/src/TripPlanner.Infrastructure/Persistence/ApplicationDbContext.cs)
-implements `IApplicationDbContext`; exposes `DbSet`s for `Users`, `Trips`,
-`ItineraryDays`, `Destinations`, `ItineraryItems`; applies all
-`IEntityTypeConfiguration<T>` classes from its assembly; overrides `SaveChangesAsync`
-to stamp `UpdatedAt` on modified `BaseEntity` rows. Note: only the `Modified` state is
-handled — `CreatedAt` comes from the C# property initializer, not the DbContext.
+is a plain `DbContext` — **`IApplicationDbContext` no longer exists anywhere in the
+codebase** (removed along with the last direct `DbSet<T>` access from the Application
+layer). It exposes `DbSet`s for `Users`, `Trips`, `ItineraryDays`, `Destinations`,
+`ItineraryItems`; applies all `IEntityTypeConfiguration<T>` classes from its assembly;
+overrides `SaveChangesAsync` to stamp `UpdatedAt` on modified `BaseEntity` rows. Note:
+only the `Modified` state is handled — `CreatedAt` comes from the C# property
+initializer, not the DbContext.
+
+**[Observed]** Nothing in Application talks to `ApplicationDbContext` directly.
+Between the services and the DbContext sits:
+- **`Repository<T>`** ([Repository.cs](backend/src/TripPlanner.Infrastructure/Persistence/Repositories/Repository.cs)) —
+  generic `IRepository<T>` (`GetByIdAsync`, `GetAllAsync`, `Add`, `Remove`) over a
+  `DbSet<T>`; registered as an open generic (`services.AddScoped(typeof(IRepository<>), typeof(Repository<>))`)
+  so it directly satisfies `IRepository<ItineraryDay>`/`IRepository<ItineraryItem>`.
+- **`UserRepository`, `TripRepository`, `DestinationRepository`** — derive from
+  `Repository<T>` and add the entity-specific queries each service needs (e.g.
+  `ITripRepository.GetDetailsAsync`/`GetTrackedWithFullGraphAsync`/`DayBelongsToTripAsync`/`GetOwnedItemAsync`,
+  all filtered by `userId` where relevant — the NFR 6 enforcement point).
+- **`UnitOfWork`** ([UnitOfWork.cs](backend/src/TripPlanner.Infrastructure/Persistence/UnitOfWork.cs)) —
+  wraps `ApplicationDbContext.SaveChangesAsync`; catches `DbUpdateException` and
+  rethrows it as the EF-agnostic `ConcurrencyException`
+  ([ConcurrencyException.cs](backend/src/TripPlanner.Application/Common/Exceptions/ConcurrencyException.cs)),
+  which is **not** one of the types `ExceptionHandlingMiddleware` maps to a status —
+  callers must catch it themselves and translate it into a feature-specific exception
+  (`TripService` does this for the two unique indexes it can race against; `AuthService`
+  does not — see B4 in §6.1). This path is **not exercised by the EF Core InMemory
+  provider** used in the test suite (InMemory doesn't enforce non-key unique indexes at
+  all, and throws a raw `ArgumentException` rather than `DbUpdateException` for a
+  primary-key collision), so it must be reasoned about directly against the real SQL
+  provider — this is called out explicitly in `UnitOfWork`'s own doc comment.
 
 ### 8.2 Provider strategy
 
@@ -503,7 +810,7 @@ default), `CreatedAt` (set in C# at construction), `UpdatedAt` (stamped by the
 | `Email` | TEXT (256) | no | **UNIQUE** (`IX_Users_Email`) |
 | `PasswordHash` | TEXT | no | BCrypt hash, salt embedded |
 | `DisplayName` | TEXT (100) | yes | |
-| `IsEmailVerified` | INTEGER | no | always `true` as written today |
+| `IsEmailVerified` | INTEGER | no | starts `false` at registration; flipped to `true` by `AuthService.VerifyEmailAsync` |
 | `CreatedAt` / `UpdatedAt` | TEXT | no / yes | |
 
 #### `Trips`
@@ -554,20 +861,26 @@ never persisted. [Observed]
 | `TripId` | TEXT | no | FK → `Trips.Id`, **CASCADE**; indexed |
 | `DestinationId` | TEXT | no | FK → `Destinations.Id`, **RESTRICT** (a destination in use cannot be deleted); indexed |
 | `ItineraryDayId` | TEXT | yes | FK → `ItineraryDays.Id`, **SET NULL** (deleting a day returns its items to Saved Places). `NULL` = the "Saved Places" bucket |
-| `SortOrder` | INTEGER | no | visit sequence within a day/bucket; **no unique index** — duplicate sort values are possible |
+| `SortOrder` | INTEGER | no | visit sequence within a day/bucket; **no unique index** — duplicate sort values are possible at the DB level. `TripService.Resequence` keeps this dense (0..n) per bucket as an **application-level** invariant (B18) after every add/reorder/move/remove, but nothing in the schema itself prevents a collision |
 | `CreatedAt` / `UpdatedAt` | TEXT | no / yes | |
 
 **Unique index:** `IX_ItineraryItems_ItineraryDayId_DestinationId` — a destination may
 appear at most once *per scheduled day*. Because `ItineraryDayId` is nullable and SQL
 treats NULLs as distinct in unique indexes, the Saved Places bucket (`NULL`) may hold
-the same destination multiple times. [Observed / Inferred]
+the same destination multiple times **at the DB level** — but `TripService.AddDestinationAsync`/
+`UpdateItineraryItemAsync` also check for a duplicate within Saved Places in memory
+(B8), so this gap is closed at the application layer even though the index alone
+wouldn't catch it. [Observed / Inferred]
 
 ### 8.5 Migrations, seeding, provider notes
 
-**[Observed]** `20260612055321_InitialCreate` is the only migration; it creates all
-five tables and seven indexes, and its `Down` drops them. There is no seed data.
-Migrations are applied automatically at startup by `ApplyMigrationsAsync` in
-[Program.cs:115](backend/src/TripPlanner.WebApi/Program.cs:115) (only when pending
+**[Observed]** `20260612055321_InitialCreate` is still the **only** migration; it
+creates all five tables and seven indexes, and its `Down` drops them. No schema change
+was needed for the email-verification feature (it reuses the pre-existing
+`IsEmailVerified` column) or for the Repository/UnitOfWork rewrite (a pure
+Application/Infrastructure-layer refactor with no entity changes). There is no seed
+data. Migrations are applied automatically at startup by `ApplyMigrationsAsync` in
+[Program.cs:102](backend/src/TripPlanner.WebApi/Program.cs:102) (only when pending
 migrations exist). The migration was scaffolded against SQLite; docker-compose
 comments note that switching to Postgres requires re-creating migrations for that
 provider.
@@ -581,40 +894,63 @@ provider.
   composition root referencing both). Each layer's `.csproj` carries an explanatory
   comment stating its rules, and the code respects them: Domain has zero references;
   Application depends on its own interfaces; Infrastructure implements them.
-- **[Observed]** Dependency Inversion is applied consistently: all five cross-layer
-  contracts (`IApplicationDbContext`, `IPasswordHasher`, `IJwtTokenGenerator`,
-  `ICurrentUserService`, `IDestinationProvider`) are declared in Application and
-  implemented in outer layers.
-- **[Observed]** Pragmatic deviations, documented in-code as deliberate choices:
-  (1) Application references the EF Core package to expose `DbSet<T>` — services query
-  EF directly rather than through repositories; (2) no CQRS/MediatR — plain service
-  interfaces per feature ("feature folder" organization:
-  `Application/Features/{Auth,Destinations,Trips}` each with service, interface,
-  `Dtos/`); (3) manual DTO mapping.
+- **[Observed]** Dependency Inversion is applied consistently — all cross-layer
+  contracts (`IRepository<T>`, `IUnitOfWork`, `IUserRepository`, `ITripRepository`,
+  `IDestinationRepository`, `IPasswordHasher`, `IJwtTokenGenerator`,
+  `ICurrentUserService`, `IDestinationProvider`, `IEmailSender`, `IAppUrlProvider`,
+  `IImageSearchProvider`) are declared in Application and implemented in outer layers.
+  **This is a change from an earlier version of the codebase**: `IApplicationDbContext`
+  (a leaked `DbSet<T>`-shaped contract) has been fully retired and replaced by the
+  Repository + Unit of Work pair above — Application takes no package dependency on
+  `Microsoft.EntityFrameworkCore` at all now (see §2.2/§8.1).
+- **[Observed]** Other pragmatic, documented-in-code deviations: (1) no CQRS/MediatR —
+  plain service interfaces per feature ("feature folder" organization:
+  `Application/Features/{Auth,Destinations,Trips}`, each with a service, an interface,
+  a `Dtos/` folder, a `Validators/` folder, and a `*Mappings.cs`); (2) centralized
+  mapping classes instead of AutoMapper (§5.2); (3) FluentValidation instead of
+  DataAnnotations or MediatR pipeline behaviors (§7).
 - **[Observed]** Controllers are uniformly thin; error handling is centralized in one
   middleware; DI composition is split into per-layer extension methods so
   `Program.cs` stays a readable pipeline description.
 - **[Observed]** Cohesion is high (one feature per folder in both backend and
   frontend); coupling between layers is limited to the interfaces above. The test
-  project references Infrastructure (for `ApplicationDbContext`,
-  `BCryptPasswordHasher`) even though it is named `Application.Tests`.
-- **[Observed]** The codebase is explicitly a teaching template: XML doc comments
-  label the Auth slice as "REFERENCE IMPLEMENTATION" and the other services as
-  "STUB — students implement this", with per-method TODOs keyed to assignment user
-  stories.
+  project references Infrastructure (for `ApplicationDbContext`, the repository
+  implementations, `BCryptPasswordHasher`, `JwtTokenGenerator`) even though it is
+  named `Application.Tests`.
+- **[Observed]** The codebase is still explicitly a teaching template, but the
+  "reference vs. stub" framing is now stale in places: `AuthController`/`AuthService`'s
+  doc comments still call Auth the "REFERENCE IMPLEMENTATION"/"REFERENCE CONTROLLER",
+  which remains true as a *pedagogical* claim (it's still the example the others were
+  modeled on), but `GeoapifyClient.cs`'s doc comment still literally opens with
+  "STUB — students implement this (Features 1 & 2)", and `ITripService.cs`/`IDestinationService.cs`
+  still carry "TODO (students): implement..." — all three are fully implemented; only
+  the comments were never updated. `DestinationService.cs`, `TripService.cs`,
+  `TripsController.cs`, `DestinationsController.cs`, and `IDestinationProvider.cs`
+  have already had their stale "STUB" wording corrected.
 
 ### DI registrations (complete list) [Observed]
 
 | Service | Implementation | Lifetime | Registered in |
 |---|---|---|---|
 | `IAuthService` | `AuthService` | Scoped | Application |
-| `ITripService` | `TripService` (stub) | Scoped | Application |
-| `IDestinationService` | `DestinationService` (stub) | Scoped | Application |
-| `ApplicationDbContext` / `IApplicationDbContext` | same instance (factory forward) | Scoped | Infrastructure |
+| `ITripService` | `TripService` | Scoped | Application |
+| `IDestinationService` | `DestinationService` | Scoped | Application |
+| `IValidator<T>` (one per validator class) | `RegisterRequestValidator`, `SearchLocationsRequestValidator`, `GetAttractionsRequestValidator`, `GetDestinationDetailsRequestValidator`, `CreateTripRequestValidator`, `UpdateTripRequestValidator`, `AddDestinationRequestValidator`, `UpdateItineraryItemRequestValidator` | Scoped (via `AddValidatorsFromAssembly`) | Application |
+| `TimeProvider` | `TimeProvider.System` | Singleton | Application |
+| `ApplicationDbContext` | — | Scoped | Infrastructure |
+| `IRepository<T>` (open generic) | `Repository<T>` | Scoped | Infrastructure |
+| `IUnitOfWork` | `UnitOfWork` | Scoped | Infrastructure |
+| `IUserRepository` | `UserRepository` | Scoped | Infrastructure |
+| `ITripRepository` | `TripRepository` | Scoped | Infrastructure |
+| `IDestinationRepository` | `DestinationRepository` | Scoped | Infrastructure |
 | `IPasswordHasher` | `BCryptPasswordHasher` | Scoped | Infrastructure |
 | `IJwtTokenGenerator` | `JwtTokenGenerator` | Scoped | Infrastructure |
+| `IAppUrlProvider` | `AppUrlProvider` | Singleton | Infrastructure |
+| `IEmailSender` | `SmtpEmailSender` (Gmail SMTP relay) | Scoped | Infrastructure |
 | `IDestinationProvider` | `GeoapifyClient` | Typed `HttpClient` (transient + `IHttpClientFactory`) | Infrastructure |
-| `IOptions<JwtSettings>` | bound to `"Jwt"` section | Singleton options | Infrastructure |
+| `IImageSearchProvider` | `SerperImageClient` | Typed `HttpClient` (8s timeout) | Infrastructure |
+| `IMemoryCache` | `AddMemoryCache()` | Singleton | Infrastructure |
+| `IOptions<JwtSettings>` / `SmtpSettings` / `GeoapifySettings` / `SerperSettings` | bound to their respective config sections | Singleton options | Infrastructure |
 | `ICurrentUserService` | `CurrentUserService` (+ `AddHttpContextAccessor`) | Scoped | WebApi (`Program.cs`) |
 
 ### Request pipeline order [Observed, Program.cs]
@@ -647,18 +983,33 @@ exception from any later stage is converted to ProblemDetails.
 | anything else | 500 | "An unexpected error occurred" (logged via `ILogger.LogError`; 500 is the only logged case) |
 
 The exception `Message` is always copied into `ProblemDetails.Detail`, including for
-500s — internal exception messages are exposed to clients. [Observed]
+500s — internal exception messages are exposed to clients. [Observed] Note
+`ConcurrencyException` (§8.1) is **not** in this switch — an uncaught one (as in
+`AuthService`'s registration race, §6.1 B4) falls through to the generic 500 case
+rather than being mapped to 409.
 
 ### Testing [Observed]
 
-One test class, [AuthServiceTests](backend/tests/TripPlanner.Application.Tests/Auth/AuthServiceTests.cs):
-5 tests covering register (success/duplicate/short password) and login
-(success/wrong password). Pattern: fresh EF InMemory database per test
-(`Guid.NewGuid()` database name), real `BCryptPasswordHasher`, Moq-faked
-`IJwtTokenGenerator`. Note the InMemory provider does not enforce the unique
-indexes or FK behaviors described in §8. No tests exist for Trip or Destination
-services (they are stubs), and no integration tests exist despite the
-`public partial class Program` hook.
+Five test classes under `backend/tests/TripPlanner.Application.Tests/`, **77 tests
+total, all passing** (`dotnet test`):
+
+| Class | Tests | Covers |
+|---|---|---|
+| [AuthServiceTests](backend/tests/TripPlanner.Application.Tests/Auth/AuthServiceTests.cs) | 12 | Register (success/duplicate email/short password), login (success/wrong password/unverified-still-succeeds), email verification (send-on-register, send failure doesn't block registration, verify with valid/invalid token, resend when unverified/already-verified) |
+| [TripServiceTests](backend/tests/TripPlanner.Application.Tests/Trips/TripServiceTests.cs) | 27 | Create/list (including NFR 6 ownership filtering and newest-first ordering), full add/move/reorder/schedule coverage, day regeneration on date changes, duplicate-in-bucket conflicts |
+| [DestinationServiceTests](backend/tests/TripPlanner.Application.Tests/Destinations/DestinationServiceTests.cs) | 29 | Search/attractions/details (F1 US1-3, F2 US1), validation errors, cache hit/miss/expiry (via a fake `TimeProvider`), stale-on-provider-outage fallback, image enrichment |
+| [RepositoryTests](backend/tests/TripPlanner.Application.Tests/Repositories/RepositoryTests.cs) | 5 | Generic `Repository<T>` + `UnitOfWork` only (add/get/get-all), using `Destination` as a stand-in entity — no dedicated `TripRepository`/`UserRepository` named-query tests exist; those queries are exercised indirectly through `TripServiceTests`/`AuthServiceTests` |
+| [JwtTokenGeneratorTests](backend/tests/TripPlanner.Application.Tests/Identity/JwtTokenGeneratorTests.cs) | 4 | The **real** `JwtTokenGenerator` (the other classes mock `IJwtTokenGenerator`) — email-verification token round-trip, garbage-token rejection, and rejecting a normal access token replayed as a verification token |
+
+Pattern (all classes): fresh EF InMemory database per test (`Guid.NewGuid()` database
+name), real validators/hashers where cheap, `Mock<T>` (Moq) for external providers and
+`IJwtTokenGenerator`/`ICurrentUserService` where a fake is cheaper than the real thing.
+Note the InMemory provider does **not** enforce the unique indexes or FK behaviors
+described in §8 (and throws a different exception shape on a PK collision than the
+real SQL providers do — see §8.1), so the concurrency catch/retry paths in
+`AuthService`/`TripService`/`UnitOfWork` are **not exercised by `dotnet test`** and
+must be reasoned about directly against SQLite/Postgres. No integration tests exist
+despite the `public partial class Program` hook.
 
 ---
 
@@ -668,42 +1019,85 @@ services (they are stubs), and no integration tests exist despite the
 
 | Package | Version | Used by | Purpose |
 |---|---|---|---|
-| Microsoft.EntityFrameworkCore | 10.0.9 | Application, Infrastructure | ORM core / `DbSet<T>` in the Application contract |
+| Microsoft.EntityFrameworkCore | 10.0.9 | Infrastructure only | ORM core — **no longer an Application-layer dependency** (confirmed: zero references to `Microsoft.EntityFrameworkCore` in `TripPlanner.Application.csproj` or any `.cs` file under that project) since the Repository/UnitOfWork rewrite retired `IApplicationDbContext` |
 | Microsoft.EntityFrameworkCore.Sqlite | 10.0.9 | Infrastructure | default DB provider |
 | Npgsql.EntityFrameworkCore.PostgreSQL | 10.0.2 | Infrastructure | optional Postgres provider |
 | Microsoft.EntityFrameworkCore.Design | 10.0.9 | Infrastructure, WebApi | `dotnet ef` tooling |
-| System.IdentityModel.Tokens.Jwt | 8.19.1 | Infrastructure | JWT creation |
+| System.IdentityModel.Tokens.Jwt | 8.19.1 | Infrastructure | JWT creation/validation (both access tokens and email-verification tokens) |
 | System.Security.Cryptography.Xml | 10.0.9 | Infrastructure | (transitive-pin; no direct usage found in code) |
 | BCrypt.Net-Next | 4.0.3 | Infrastructure | password hashing |
-| Microsoft.Extensions.Http / Options / Configuration.Abstractions / DI.Abstractions | 10.0.9 | Application/Infrastructure | HttpClientFactory, options pattern, DI |
+| FluentValidation.DependencyInjectionExtensions | 12.1.1 | **Application** | request-DTO validators (§7) + `AddValidatorsFromAssembly` registration |
+| Microsoft.Extensions.Caching.Memory | 10.0.9 | **Application** | `IMemoryCache` used by `DestinationService`'s cache-aside layer (§3.2) |
+| Microsoft.Extensions.DependencyInjection.Abstractions | 10.0.9 | Application | DI container abstractions |
+| Microsoft.Extensions.Http / Options / Configuration.Abstractions | 10.0.9 | Infrastructure | HttpClientFactory (Geoapify + Serper typed clients), options pattern |
 | Microsoft.AspNetCore.Authentication.JwtBearer | 10.0.9 | WebApi | JWT validation |
 | Swashbuckle.AspNetCore | 7.2.0 | WebApi | Swagger/OpenAPI |
+| DotNetEnv | 3.2.0 | WebApi | loads the git-ignored `.env` file into process environment variables at startup |
 | Microsoft.NET.Test.Sdk 17.12.0, xunit 2.9.2, xunit.runner.visualstudio 2.8.2, EFCore.InMemory 10.0.9, Moq 4.20.72 | — | Tests | test stack |
+
+**[Observed]** Neither Geoapify nor Serper has a dedicated client-library NuGet
+package — both are called via a plain `HttpClient` (`GeoapifyClient`,
+`SerperImageClient`) configured through `AddHttpClient<TInterface, TImplementation>`.
 
 ### Frontend npm packages [Observed from package.json]
 
-`react` 19, `react-dom` 19, `react-router-dom` 7, `axios` 1.7; dev: `vite` 6,
-`typescript` 5.7, `@vitejs/plugin-react`. No ESLint (`npm run lint` is `tsc --noEmit`).
+`react` 19, `react-dom` 19, `react-router-dom` 7, `axios` 1.7, `tailwindcss` 4 +
+`@tailwindcss/vite` (utility-first styling, added since the original version of this
+document); dev: `vite` 6, `typescript` 5.7, `@vitejs/plugin-react`. **ESLint is now
+present** (`eslint` 9 flat config in `frontend/eslint.config.js`, plus
+`typescript-eslint`, `eslint-plugin-react-hooks`, `eslint-plugin-react-refresh`) —
+`npm run lint` is `tsc --noEmit && eslint .`, not just the type-check it used to be.
 
 ### Third-party services
 
-- **Geoapify** (https://apidocs.geoapify.com/docs) — configured (`Geoapify:BaseUrl` =
-  `https://api.geoapify.com/`, empty `ApiKey` placeholder) and wired
-  as a typed HttpClient, but **never actually called** because the client is a stub.
-  [Observed]
+- **Geoapify** (https://apidocs.geoapify.com/docs) — geocoding/places provider behind
+  `IDestinationProvider`; base URL and API key both come from `.env`
+  (`Geoapify__BaseUrl`, `Geoapify__ApiKey`), with a `https://api.geoapify.com/` fallback
+  baked into `DependencyInjection.cs` if unset. Actually called now (F1/F2 are
+  implemented) — an empty `ApiKey` means every call fails at Geoapify's end, not that
+  the client is unreachable code. [Observed]
+- **Serper** (https://serper.dev/, Google Images proxy) — behind `IImageSearchProvider`
+  (`SerperImageClient`); base URL/key from `.env` (`Serper__BaseUrl`, `Serper__ApiKey`).
+  `SerperImageClient` explicitly short-circuits to an empty result (no HTTP call) when
+  `ApiKey` is unset, to avoid a guaranteed-401 round trip on every request. [Observed]
+- **Gmail SMTP relay** (smtp.gmail.com:587, STARTTLS) — behind `IEmailSender`
+  (`SmtpEmailSender`), for the F4/US2 verification email; requires a Google Account App
+  Password (`Smtp__User`/`Smtp__AppPassword` in `.env`). `SmtpEmailSender` silently
+  no-ops (no send, no throw) when unconfigured. [Observed]
 - **PostgreSQL via Docker** — optional, off by default. [Observed]
-- No cache, message queue, email provider, or file storage exists. [Observed]
+- **In-process cache**: `IMemoryCache` (`Microsoft.Extensions.Caching.Memory`) backs
+  `DestinationService`'s cache-aside layer — not a distributed cache, so it does not
+  survive a process restart and is not shared across horizontally-scaled instances.
+  [Observed]
+- No message queue or file storage exists. [Observed]
 
-### Configuration summary [Observed, appsettings.json]
+### Configuration summary [Observed]
 
-`Logging` (EF command logging at Warning), `AllowedHosts: *`,
-`Database:Provider = Sqlite`, connection strings for Sqlite + Postgres,
-`Jwt` (issuer/audience/key/expiry), `Cors:AllowedOrigins`, `Geoapify`
-(base URL + empty API key). `appsettings.Development.json` only raises ASP.NET Core
-log verbosity. Secrets management: none — the JWT dev key and Postgres password are
-committed in plain text; put the Geoapify key
-in `appsettings.Development.json`. Frontend: `VITE_API_BASE_URL` env var (read in
-`client.ts`, default `http://localhost:5080/api`).
+`appsettings.json` now keeps only the SQLite connection string and non-URL structural
+defaults: `Logging` (EF command logging at Warning), `AllowedHosts: *`,
+`Database:Provider = Sqlite`, `ConnectionStrings:Sqlite`, `Jwt`
+(issuer/audience/key/expiry — the key is still a **committed dev placeholder**,
+`"CHANGE_ME_dev_only_signing_key_min_32_chars_long!"`), empty `Geoapify:ApiKey` /
+`Serper:ApiKey` placeholders, and `Smtp:Host`/`Smtp:Port` (`smtp.gmail.com`/`587`).
+`appsettings.Development.json` only raises ASP.NET Core log verbosity.
+
+**Every URL and secret has moved to `.env`** (git-ignored; see
+[.env.example](backend/src/TripPlanner.WebApi/.env.example)), loaded via
+`DotNetEnv.Env.Load()` at the top of `Program.cs` before the configuration builder
+runs: `Geoapify__ApiKey`, `Serper__ApiKey`, `Smtp__User`, `Smtp__AppPassword`,
+`Cors__AllowedOrigins__0`, `App__FrontendBaseUrl`, `Geoapify__BaseUrl`,
+`Serper__BaseUrl`, `ConnectionStrings__Postgres`. This is a change from an earlier
+version of the codebase where `Cors:AllowedOrigins`, `App:FrontendBaseUrl`,
+`Geoapify:BaseUrl`, `Serper:BaseUrl`, and `ConnectionStrings:Postgres` lived directly
+in `appsettings.json`. Every one of these env vars has a matching
+`?? "localhost default"` fallback in code (`AppUrlProvider.cs`,
+`Infrastructure/DependencyInjection.cs`'s Geoapify/Serper `HttpClient` setup,
+`Program.cs`'s CORS policy), so the app still runs with no `.env` file at all — Geoapify
+search/attractions calls would just fail with an invalid/empty API key rather than the
+app failing to start. Secrets management otherwise: none — the JWT dev key and
+docker-compose Postgres password are still committed in plain text. Frontend:
+`VITE_API_BASE_URL` env var (read in `client.ts`, default
+`http://localhost:5080/api`).
 
 ---
 

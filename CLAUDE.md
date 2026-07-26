@@ -44,7 +44,7 @@ dotnet ef migrations add <MigrationName> \
 npm install
 npm run dev        # Dev server at http://localhost:5173
 npm run build      # Type-check + Vite build
-npm run lint       # tsc --noEmit only (no ESLint)
+npm run lint       # tsc --noEmit + ESLint (flat config in eslint.config.js)
 ```
 
 ### Quick start (both servers, from repo root)
@@ -87,7 +87,7 @@ WebApi ──▶ Application ──▶ Domain
   | `NotImplementedException` | 501 |
 - **Reference slice**: `AuthService.cs` + `AuthController.cs` are the canonical worked example. Study them before implementing other features.
 - **Destination caching**: `Destination` rows are a cache of external-provider data (Geoapify), keyed by a unique index on `ProviderId` (`DestinationConfiguration.cs`). `DestinationService` (search/details) never persists rows — only `TripService.AddDestinationAsync` upserts one, on first add to any trip. Do not reintroduce a "must already exist" lookup there; a fresh `ProviderId` is expected and should upsert, not 404.
-- **Concurrency via unique index + catch/retry**: this codebase enforces invariants that matter under concurrent requests as DB-level unique indexes (`User.Email`, `Destination.ProviderId`, `(ItineraryDayId, DestinationId)`, `(TripId, ItineraryDayId, SortOrder)`) rather than app-level locking. Read-then-write code against one of these (e.g. computing the next `SortOrder`, or upserting a `Destination`) must catch `DbUpdateException` and retry/re-fetch — see `TripService.AddDestinationAsync` for the pattern. EF Core's InMemory provider (used in tests) does **not** enforce these indexes, so this path is untested by `dotnet test` and must be reasoned about directly against the SQL provider.
+- **Concurrency via unique index + catch/retry**: this codebase enforces invariants that matter under concurrent requests as DB-level unique indexes (`User.Email`, `Destination.ProviderId`, `(ItineraryDayId, DestinationId)`) rather than app-level locking. Read-then-write code against one of these (e.g. upserting a `Destination`) must catch `DbUpdateException` and retry/re-fetch — see `TripService.AddDestinationAsync` for the pattern. EF Core's InMemory provider (used in tests) does **not** enforce these indexes, so this path is untested by `dotnet test` and must be reasoned about directly against the SQL provider. `ItineraryItem.SortOrder` is *not* a DB-level unique index — ordering is enforced purely in-memory via dense resequencing per request (`TripService.Resequence`), so two concurrent reorders of the same day/bucket race without a DB-level guard; this is a known gap, not an oversight.
 
 ### Feature layout (backend)
 
@@ -104,17 +104,21 @@ Each feature folder holds: the service implementation, an interface, and a `Dtos
 
 ```
 src/
-  api/         ← axios wrappers: client.ts (base instance), auth.ts (reference impl)
-  auth/        ← AuthContext (JWT storage/refresh), ProtectedRoute
-  features/    ← page components grouped by feature
-  types.ts     ← shared TypeScript types
+  api/         ← axios wrappers: client.ts (base instance), auth.ts, destinations.ts, trips.ts
+  auth/        ← AuthContext (JWT storage, reactive logout on 401), ProtectedRoute
+  features/    ← page components grouped by feature (auth, destinations, trips — all implemented)
+  types.ts     ← shared TypeScript types for every DTO (auth, destination, trip)
   App.tsx      ← React Router route definitions
 ```
 
 HTTP client (`src/api/client.ts`) is a configured Axios instance whose JWT interceptor
-attaches `Authorization: Bearer <token>` when present. `destinations.ts` and `trips.ts`
-wrappers don't exist yet — follow `auth.ts`'s pattern when adding them. `types.ts` only
-has `User`/`AuthResponse` today; trip/destination types are a TODO too.
+attaches `Authorization: Bearer <token>` when present, and exposes `getErrorMessage(err,
+fallback)` — the shared helper every feature page uses to turn a caught error into the
+backend's `ProblemDetails.detail` (or a fallback string). `destinations.ts` and `trips.ts`
+follow `auth.ts`'s pattern: thin typed wrappers over `apiClient`, no raw `fetch`/`axios`
+calls in components. `types.ts` covers `User`/`AuthResponse` plus every destination/trip
+DTO consumed by the feature pages — add new shared shapes here rather than declaring
+ad-hoc inline interfaces in components.
 
 ### Testing pattern (xUnit)
 
@@ -135,9 +139,17 @@ Arrange with a fresh `CreateDb()`, construct the service under test with real im
 - JWT settings in `appsettings.json` under `"Jwt"` (Key, Issuer, Audience)
 - Database defaults to SQLite (`tripplanner.db` in the WebApi folder). Switch to PostgreSQL by setting `"Database": { "Provider": "Postgres" }` in `appsettings.Development.json` and running `docker compose up -d`.
 - Migrations apply automatically on startup via `ApplyMigrationsAsync` in `Program.cs`.
-- External API keys (Geoapify, Serper) are git-ignored, local-only secrets loaded from
+- All environment-specific URLs and secrets are git-ignored, local-only values loaded from
   `backend/src/TripPlanner.WebApi/.env` via `DotNetEnv.Env.Load()` in `Program.cs` — copy
-  `.env.example` to `.env` and fill in real keys. Nested config keys use `__` as the
-  separator (e.g. `Geoapify__ApiKey`, `Serper__ApiKey`), since `.env` values become
-  process environment variables and ASP.NET Core's `AddEnvironmentVariables()` treats
-  `__` as the section delimiter.
+  `.env.example` to `.env` and fill in real values. This includes not just the Geoapify/Serper
+  API keys and SMTP credentials, but every URL that previously lived in `appsettings.json`:
+  `Cors__AllowedOrigins__0`, `App__FrontendBaseUrl`, `Geoapify__BaseUrl`, `Serper__BaseUrl`,
+  and `ConnectionStrings__Postgres`. `appsettings.json` only keeps the SQLite connection
+  string and non-URL structural defaults (e.g. `Smtp:Host`/`Smtp:Port`). Nested config keys
+  use `__` as the separator (e.g. `Geoapify__ApiKey`), since `.env` values become process
+  environment variables and ASP.NET Core's `AddEnvironmentVariables()` treats `__` as the
+  section delimiter; array elements use a trailing index (`Cors__AllowedOrigins__0`).
+  Every one of these has a matching `?? "localhost default"` fallback in code, so the app
+  still runs with no `.env` overrides at all — see `AppUrlProvider.cs`,
+  `DependencyInjection.cs` (Geoapify/Serper `HttpClient` setup), and `Program.cs`'s CORS
+  policy.

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import axios from 'axios';
+import { getErrorMessage } from '../api/client';
 import { resendVerificationEmail } from '../api/auth';
 import { useAuth } from '../auth/AuthContext';
 
@@ -24,11 +24,7 @@ export function EmailVerificationBanner() {
       await resendVerificationEmail();
       setSent(true);
     } catch (err) {
-      setError(
-        axios.isAxiosError(err)
-          ? (err.response?.data?.detail ?? 'Could not resend the email. Please try again.')
-          : 'Could not resend the email. Please try again.',
-      );
+      setError(getErrorMessage(err, 'Could not resend the email. Please try again.'));
     } finally {
       setSending(false);
     }

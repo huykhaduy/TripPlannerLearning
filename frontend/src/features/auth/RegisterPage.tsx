@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { Link, Navigate, useNavigate } from 'react-router-dom';
-import axios from 'axios';
+import { getErrorMessage } from '../../api/client';
 import { useAuth } from '../../auth/AuthContext';
 import { Card } from '../../components/Card';
 import { Field, fieldControlClass } from '../../components/Field';
@@ -30,10 +30,7 @@ export function RegisterPage() {
       await register(email, password, displayName || undefined);
       navigate('/trips');
     } catch (err) {
-      const message = axios.isAxiosError(err)
-        ? (err.response?.data?.detail ?? 'Registration failed.')
-        : 'Registration failed.';
-      setError(message);
+      setError(getErrorMessage(err, 'Registration failed.'));
     } finally {
       setSubmitting(false);
     }

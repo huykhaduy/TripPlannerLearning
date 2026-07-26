@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
-import axios from 'axios';
+import { getErrorMessage } from '../../api/client';
 import { createTrip, getMyTrips } from '../../api/trips';
 import { Card } from '../../components/Card';
 import { Field, fieldControlClass } from '../../components/Field';
@@ -98,10 +98,7 @@ export function TripsPage() {
       setName('');
       setModalOpen(false);
     } catch (err) {
-      const message = axios.isAxiosError(err)
-        ? (err.response?.data?.detail ?? 'Could not create the trip.')
-        : 'Could not create the trip.';
-      setCreateError(message);
+      setCreateError(getErrorMessage(err, 'Could not create the trip.'));
     } finally {
       setCreating(false);
     }

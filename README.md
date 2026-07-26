@@ -141,7 +141,11 @@ dotnet test
    ```json
    { "Database": { "Provider": "Postgres" } }
    ```
-3. Delete the SQLite `Migrations` folder, re-run `dotnet ef migrations add InitialCreate`
+3. The `ConnectionStrings__Postgres` connection string lives in `.env` (see
+   `.env.example`), not `appsettings.json` — its default already matches
+   `docker-compose.yml`'s credentials, so no change is needed unless you edit
+   the compose file.
+4. Delete the SQLite `Migrations` folder, re-run `dotnet ef migrations add InitialCreate`
    (providers generate different SQL), then `dotnet run`.
 
 ---

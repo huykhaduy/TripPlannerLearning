@@ -4,11 +4,9 @@ namespace TripPlanner.Application.Common.Interfaces;
 
 /// <summary>
 /// Abstraction over the external travel data provider(s) — e.g. Geoapify for
-/// geocoding/POIs (Features 1 &amp; 2).
-///
-/// TODO (students): implement this in Infrastructure (see GeoapifyClient).
-/// Keeping it behind an interface means your search use-cases never depend on a
-/// specific vendor and can be unit-tested with a fake provider.
+/// geocoding/POIs (Features 1 &amp; 2), implemented by <c>GeoapifyClient</c> in
+/// Infrastructure. Keeping it behind an interface means the search use-cases
+/// never depend on a specific vendor and can be unit-tested with a fake provider.
 /// </summary>
 public interface IDestinationProvider
 {

@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import axios from 'axios';
+import { getErrorMessage } from '../../api/client';
 import { getTrip, removeDestination, updateItineraryItem, updateTrip } from '../../api/trips';
 import { Card } from '../../components/Card';
 import { Field, fieldControlClass } from '../../components/Field';
@@ -219,10 +220,7 @@ export function TripDetailPage() {
       const updated = await updateTrip(tripId, name.trim(), startDate || null, endDate || null);
       applyTrip(updated);
     } catch (err) {
-      const message = axios.isAxiosError(err)
-        ? (err.response?.data?.detail ?? 'Could not save the trip.')
-        : 'Could not save the trip.';
-      setSaveError(message);
+      setSaveError(getErrorMessage(err, 'Could not save the trip.'));
     } finally {
       setSaving(false);
     }
@@ -242,10 +240,7 @@ export function TripDetailPage() {
       await updateItineraryItem(tripId, itemId, targetDayId, position);
     } catch (err) {
       setTrip(snapshot); // roll back the optimistic move
-      const message = axios.isAxiosError(err)
-        ? (err.response?.data?.detail ?? 'Could not move the destination.')
-        : 'Could not move the destination.';
-      setMoveError(message);
+      setMoveError(getErrorMessage(err, 'Could not move the destination.'));
     }
   }
 

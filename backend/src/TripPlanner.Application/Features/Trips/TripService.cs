@@ -11,15 +11,14 @@ using ValidationException = TripPlanner.Application.Common.Exceptions.Validation
 namespace TripPlanner.Application.Features.Trips;
 
 /// <summary>
-/// STUB — students implement this (Feature 3: Trip Planner).
+/// Trip planner (Feature 3): CRUD, date-driven itinerary generation, and
+/// destination scheduling/reordering across days.
 ///
-/// Use <see cref="AuthService"/> as your reference for structure. Key points:
-///   * read the owner from <see cref="ICurrentUserService.UserId"/> and filter
-///     every query by it — never trust a trip id alone (NFR 6 / authorization);
-///   * throw <see cref="Common.Exceptions.NotFoundException"/> when a trip the
-///     current user owns does not exist;
-///   * when dates change (US2) regenerate <c>ItineraryDay</c> rows for the new
-///     range and call <c>Trip.SetDates</c> to enforce start ≤ end.
+/// Every read/write path resolves the owner from
+/// <see cref="ICurrentUserService.GetRequiredUserId"/> and filters by it —
+/// never trusts a trip id alone (NFR 6 / authorization). Date changes (US2)
+/// regenerate <c>ItineraryDay</c> rows for the new range via
+/// <c>Trip.SetDates</c>.
 /// </summary>
 public class TripService : ITripService
 {
