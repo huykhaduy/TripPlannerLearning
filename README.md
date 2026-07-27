@@ -148,6 +148,20 @@ dotnet test
 4. Delete the SQLite `Migrations` folder, re-run `dotnet ef migrations add InitialCreate`
    (providers generate different SQL), then `dotnet run`.
 
+## Switching to Redis (optional)
+
+1. `docker compose up -d` (starts Redis on port 6379 — safe to run alongside Postgres).
+2. In `backend/src/TripPlanner.WebApi/appsettings.Development.json`, add:
+   ```json
+   { "Cache": { "Provider": "Redis" } }
+   ```
+3. The `ConnectionStrings__Redis` value lives in `.env` (see `.env.example`) —
+   its default already matches `docker-compose.yml`'s port, so no change is
+   needed unless you edit the compose file.
+4. No migration step needed — caching has no schema. Just restart the API
+   (`dotnet run`); destination search/attractions/details now cache through
+   Redis instead of the in-process default.
+
 ---
 
 ## Where to write your code

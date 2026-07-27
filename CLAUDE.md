@@ -138,6 +138,7 @@ Arrange with a fresh `CreateDb()`, construct the service under test with real im
 - API URL: `http://localhost:5080`; frontend `.env` → `VITE_API_BASE_URL=http://localhost:5080/api`
 - JWT settings in `appsettings.json` under `"Jwt"` (Key, Issuer, Audience)
 - Database defaults to SQLite (`tripplanner.db` in the WebApi folder). Switch to PostgreSQL by setting `"Database": { "Provider": "Postgres" }` in `appsettings.Development.json` and running `docker compose up -d`.
+- Destination browse-path caching (`DestinationService`) defaults to an in-process `IDistributedCache`. Switch to Redis by setting `"Cache": { "Provider": "Redis" } }` in `appsettings.Development.json` and running `docker compose up -d`; the connection string comes from `.env` (`ConnectionStrings__Redis`), not `appsettings.json`.
 - Migrations apply automatically on startup via `ApplyMigrationsAsync` in `Program.cs`.
 - All environment-specific URLs and secrets are git-ignored, local-only values loaded from
   `backend/src/TripPlanner.WebApi/.env` via `DotNetEnv.Env.Load()` in `Program.cs` — copy

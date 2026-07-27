@@ -134,7 +134,10 @@ WebApi ──▶ Application ──▶ Domain
 
 - `TripPlanner.Domain` references **nothing** (no packages, no projects).
 - `TripPlanner.Application` references Domain + `FluentValidation.DependencyInjectionExtensions`
-  + `Microsoft.Extensions.Caching.Memory` + `Microsoft.Extensions.DependencyInjection.Abstractions`.
+  + `Microsoft.Extensions.Caching.Abstractions` + `StackExchange.Redis` (only for the
+  `RedisConnectionException`/`RedisTimeoutException` types used in `DestinationService`'s
+  cache-outage handling — Application never touches `ConnectionMultiplexer` or a
+  connection string) + `Microsoft.Extensions.DependencyInjection.Abstractions`.
   It does **not** reference `Microsoft.EntityFrameworkCore` at all (confirmed by grep — zero
   matches in the `.csproj` or any `.cs` file under this project); the repository
   abstractions it depends on (`IRepository<T>`, `IUnitOfWork`, `IUserRepository`,
@@ -614,7 +617,7 @@ following `api/auth.ts`'s pattern — no raw `fetch`/`axios` calls remain in com
 | B17 | Search queries must be ≥ 2 characters; attraction radius must be in `(0, 50]` km; latitude/longitude must be on the globe | `SearchLocationsRequestValidator` / `GetAttractionsRequestValidator` | 400 |
 | B18 | `SortOrder` within a bucket (day or Saved Places) is kept dense (0..n) after any add/reorder/move/remove | `TripService.Resequence`, called from `UpdateItineraryItemAsync` — **not** a DB constraint (no unique index on `SortOrder`; see §8.4) | — |
 | B19 | Trip list/detail/add/remove/reorder are all scoped to the caller (NFR 6) | every `TripService` method resolves `userId` via `ICurrentUserService.GetRequiredUserId()` and every repository query filters by it (`ITripRepository.GetSummaryRowsForUserAsync`/`GetDetailsAsync`/`GetTrackedWithFullGraphAsync`/`GetOwnedItemAsync`) | 401 anonymous; 404 for someone else's trip (indistinguishable from "doesn't exist") |
-| B20 | Provider/browse results are cached (cache-aside, `IMemoryCache`) with TTLs of 24h (locations, details), 6h (attractions), and stale-while-revalidate fallback on a provider outage | `DestinationService.GetCachedAsync`/`GetCachedProviderDetailsAsync`/`GetAttractionImagesAsync` | — |
+| B20 | Provider/browse results are cached (cache-aside, `IDistributedCache` — in-process by default, Redis when `Cache:Provider` is set) with TTLs of 24h (locations, details), 6h (attractions), and stale-while-revalidate fallback on a provider outage **or a cache backend outage** | `DestinationService.GetCachedAsync`/`GetCachedProviderDetailsAsync`/`GetAttractionImagesAsync` via the shared `TryGetCachedEnvelopeAsync`/`SetCachedEnvelopeAsync` helpers | — |
 | B21 | Login is blocked until the email is verified — checked only after the password is confirmed correct, so a wrong-password guess never reveals verification status | `AuthService.LoginAsync` throws `ForbiddenException` when `IsEmailVerified` is `false`; registration does not issue a session, so this is the only way in | 403 |
 
 ### 6.2 Inferred / partially-enforced behavior
@@ -1041,7 +1044,10 @@ despite the `public partial class Program` hook.
 | System.Security.Cryptography.Xml | 10.0.9 | Infrastructure | (transitive-pin; no direct usage found in code) |
 | BCrypt.Net-Next | 4.0.3 | Infrastructure | password hashing |
 | FluentValidation.DependencyInjectionExtensions | 12.1.1 | **Application** | request-DTO validators (§7) + `AddValidatorsFromAssembly` registration |
-| Microsoft.Extensions.Caching.Memory | 10.0.9 | **Application** | `IMemoryCache` used by `DestinationService`'s cache-aside layer (§3.2) |
+| Microsoft.Extensions.Caching.Abstractions | 10.0.9 | **Application** | `IDistributedCache` used by `DestinationService`'s cache-aside layer (§3.2) |
+| StackExchange.Redis | (resolved by NuGet) | **Application** | `RedisConnectionException`/`RedisTimeoutException` types only, for cache-outage detection — no direct Redis connection code in Application |
+| Microsoft.Extensions.Caching.Memory | 10.0.9 | Infrastructure | `AddDistributedMemoryCache()` — the default, in-process `IDistributedCache` implementation |
+| Microsoft.Extensions.Caching.StackExchangeRedis | (resolved by NuGet) | Infrastructure | `AddStackExchangeRedisCache()` — the opt-in Redis-backed `IDistributedCache` implementation |
 | Microsoft.Extensions.DependencyInjection.Abstractions | 10.0.9 | Application | DI container abstractions |
 | Microsoft.Extensions.Http / Options / Configuration.Abstractions | 10.0.9 | Infrastructure | HttpClientFactory (Geoapify + Serper typed clients), options pattern |
 | Microsoft.AspNetCore.Authentication.JwtBearer | 10.0.9 | WebApi | JWT validation |
@@ -1079,10 +1085,13 @@ present** (`eslint` 9 flat config in `frontend/eslint.config.js`, plus
   Password (`Smtp__User`/`Smtp__AppPassword` in `.env`). `SmtpEmailSender` silently
   no-ops (no send, no throw) when unconfigured. [Observed]
 - **PostgreSQL via Docker** — optional, off by default. [Observed]
-- **In-process cache**: `IMemoryCache` (`Microsoft.Extensions.Caching.Memory`) backs
-  `DestinationService`'s cache-aside layer — not a distributed cache, so it does not
-  survive a process restart and is not shared across horizontally-scaled instances.
-  [Observed]
+- **Cache**: `IDistributedCache` backs `DestinationService`'s cache-aside layer,
+  switchable via `Cache:Provider` — `AddDistributedMemoryCache()` (default, in-process;
+  does not survive a restart, not shared across instances) or
+  `AddStackExchangeRedisCache()` (optional, `docker-compose.yml`'s `redis` service;
+  survives restarts, shareable across instances). A cache-backend connectivity failure
+  is caught and treated as a cache miss — search/attractions/details keep working,
+  just always-fresh, until the cache is reachable again. [Observed]
 - No message queue or file storage exists. [Observed]
 
 ### Configuration summary [Observed]
