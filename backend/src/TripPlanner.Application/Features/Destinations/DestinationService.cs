@@ -1,7 +1,8 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
 using FluentValidation;
-using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Caching.Distributed;
+using StackExchange.Redis;
 using TripPlanner.Application.Common.Exceptions;
 using TripPlanner.Application.Common.Interfaces;
 using TripPlanner.Application.Common.Validation;
@@ -52,7 +53,7 @@ public class DestinationService : IDestinationService
     private readonly IDestinationRepository _destinations;
     private readonly IDestinationProvider _provider;
     private readonly IImageSearchProvider _imageSearch;
-    private readonly IMemoryCache _cache;
+    private readonly IDistributedCache _cache;
     private readonly TimeProvider _clock;
     private readonly IValidator<SearchLocationsRequest> _searchValidator;
     private readonly IValidator<GetAttractionsRequest> _attractionsValidator;
@@ -62,7 +63,7 @@ public class DestinationService : IDestinationService
         IDestinationRepository destinations,
         IDestinationProvider provider,
         IImageSearchProvider imageSearch,
-        IMemoryCache cache,
+        IDistributedCache cache,
         TimeProvider clock,
         IValidator<SearchLocationsRequest> searchValidator,
         IValidator<GetAttractionsRequest> attractionsValidator,
@@ -86,13 +87,56 @@ public class DestinationService : IDestinationService
     private sealed record CacheEnvelope<T>(T Value, DateTimeOffset FetchedAt);
 
     /// <summary>
+    /// Reads and JSON-deserializes a <see cref="CacheEnvelope{T}"/> from
+    /// <see cref="IDistributedCache"/>. A connectivity failure (Redis down or
+    /// unreachable) is treated exactly like a cache miss — never surfaced to
+    /// the caller — per the "degrade gracefully" design decision.
+    /// </summary>
+    private async Task<CacheEnvelope<T>?> TryGetCachedEnvelopeAsync<T>(string key, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var bytes = await _cache.GetAsync(key, cancellationToken);
+            return bytes is null ? null : JsonSerializer.Deserialize<CacheEnvelope<T>>(bytes);
+        }
+        catch (Exception ex) when (IsCacheUnavailable(ex))
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// JSON-serializes and writes a <see cref="CacheEnvelope{T}"/> to
+    /// <see cref="IDistributedCache"/>, retained for <see cref="CacheRetention"/>.
+    /// A connectivity failure is swallowed — the freshly-fetched value the
+    /// caller already has is still returned; this round just isn't cached.
+    /// </summary>
+    private async Task SetCachedEnvelopeAsync<T>(string key, CacheEnvelope<T> envelope, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var bytes = JsonSerializer.SerializeToUtf8Bytes(envelope);
+            await _cache.SetAsync(
+                key, bytes,
+                new DistributedCacheEntryOptions { AbsoluteExpirationRelativeToNow = CacheRetention },
+                cancellationToken);
+        }
+        catch (Exception ex) when (IsCacheUnavailable(ex))
+        {
+        }
+    }
+
+    private static bool IsCacheUnavailable(Exception ex) =>
+        ex is RedisConnectionException or RedisTimeoutException or TimeoutException;
+
+    /// <summary>
     /// Cache-aside over the provider (NFR1/NFR2): fresh hit → no provider
     /// call; miss/expired → fetch and re-cache; provider down but a stale
     /// entry exists → serve it rather than fail (spec §11.2).
     /// </summary>
-    private async Task<T> GetCachedAsync<T>(string key, TimeSpan ttl, Func<Task<T>> fetchAsync)
+    private async Task<T> GetCachedAsync<T>(string key, TimeSpan ttl, Func<Task<T>> fetchAsync, CancellationToken cancellationToken)
     {
-        var stale = _cache.TryGetValue(key, out CacheEnvelope<T>? envelope) ? envelope : null;
+        var stale = await TryGetCachedEnvelopeAsync<T>(key, cancellationToken);
         if (stale is not null && _clock.GetUtcNow() - stale.FetchedAt < ttl)
         {
             return stale.Value;
@@ -101,7 +145,7 @@ public class DestinationService : IDestinationService
         try
         {
             var value = await fetchAsync();
-            _cache.Set(key, new CacheEnvelope<T>(value, _clock.GetUtcNow()), CacheRetention);
+            await SetCachedEnvelopeAsync(key, new CacheEnvelope<T>(value, _clock.GetUtcNow()), cancellationToken);
             return value;
         }
         catch (HttpRequestException) when (stale is not null)
@@ -134,7 +178,7 @@ public class DestinationService : IDestinationService
                     .OrderBy(s => RelevanceRank(s.Name, loweredQuery))
                     .Take(MaxLocationResults)
                     .ToList();
-            });
+            }, cancellationToken);
     }
 
     /// <summary>Exact match first, then prefix matches, then everything else.</summary>
@@ -176,7 +220,7 @@ public class DestinationService : IDestinationService
                     .ToList();
 
                 return await EnrichWithImagesAsync(ranked, cancellationToken);
-            });
+            }, cancellationToken);
     }
 
     /// <summary>
@@ -221,7 +265,7 @@ public class DestinationService : IDestinationService
     private async Task<IReadOnlyList<string>> GetAttractionImagesAsync(string providerId, string name, string? providerImage, CancellationToken cancellationToken)
     {
         var key = $"imgs:{providerId}";
-        var stale = _cache.TryGetValue(key, out CacheEnvelope<IReadOnlyList<string>>? envelope) ? envelope : null;
+        var stale = await TryGetCachedEnvelopeAsync<IReadOnlyList<string>>(key, cancellationToken);
         if (stale is not null && _clock.GetUtcNow() - stale.FetchedAt < ImageTtl)
         {
             return stale.Value;
@@ -248,7 +292,7 @@ public class DestinationService : IDestinationService
             images = stale.Value; // nothing resolved this round — prefer a stale gallery over none at all
         }
 
-        _cache.Set(key, new CacheEnvelope<IReadOnlyList<string>>(images, _clock.GetUtcNow()), CacheRetention);
+        await SetCachedEnvelopeAsync(key, new CacheEnvelope<IReadOnlyList<string>>(images, _clock.GetUtcNow()), cancellationToken);
         return images;
     }
 
@@ -286,7 +330,7 @@ public class DestinationService : IDestinationService
     private async Task<DestinationDetailsDto?> GetCachedProviderDetailsAsync(string providerId, CancellationToken cancellationToken)
     {
         var key = $"details:{providerId}";
-        var stale = _cache.TryGetValue(key, out CacheEnvelope<DestinationDetailsDto>? envelope) ? envelope : null;
+        var stale = await TryGetCachedEnvelopeAsync<DestinationDetailsDto>(key, cancellationToken);
         if (stale is not null && _clock.GetUtcNow() - stale.FetchedAt < DetailsTtl)
         {
             return stale.Value;
@@ -304,7 +348,7 @@ public class DestinationService : IDestinationService
 
         if (details is not null)
         {
-            _cache.Set(key, new CacheEnvelope<DestinationDetailsDto>(details, _clock.GetUtcNow()), CacheRetention);
+            await SetCachedEnvelopeAsync(key, new CacheEnvelope<DestinationDetailsDto>(details, _clock.GetUtcNow()), cancellationToken);
         }
 
         return details;

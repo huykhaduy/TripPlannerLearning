@@ -1,5 +1,7 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Options;
 using Moq;
 using TripPlanner.Application.Common.Exceptions;
 using TripPlanner.Application.Common.Interfaces;
@@ -82,7 +84,7 @@ public class DestinationServiceTests
         FakeClock? clock = null,
         Mock<IImageSearchProvider>? imageSearch = null) =>
         new(new DestinationRepository(db), provider.Object, (imageSearch ?? NoOpImageSearch()).Object,
-            new MemoryCache(new MemoryCacheOptions()), clock ?? new FakeClock(),
+            new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions())), clock ?? new FakeClock(),
             new SearchLocationsRequestValidator(), new GetAttractionsRequestValidator(),
             new GetDestinationDetailsRequestValidator());
 

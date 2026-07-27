@@ -32,8 +32,11 @@ public static class DependencyInjection
         services.Configure<SmtpSettings>(configuration.GetSection(SmtpSettings.SectionName));
         services.AddScoped<IEmailSender, SmtpEmailSender>();
 
-        // In-memory cache for browse-path provider results (spec §11.2 NFR1/NFR2).
-        services.AddMemoryCache();
+        // Cache backend for browse-path provider results (spec §11.2 NFR1/NFR2),
+        // switchable from configuration: "Cache:Provider" = "Memory" (default) or
+        // "Redis". Both branches register IDistributedCache — DestinationService
+        // depends only on that abstraction, never on StackExchange.Redis directly.
+        AddCaching(services, configuration);
 
         // External travel data provider (typed HttpClient + bound settings).
         services.Configure<GeoapifySettings>(configuration.GetSection(GeoapifySettings.SectionName));
@@ -84,5 +87,22 @@ public static class DependencyInjection
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IDestinationRepository, DestinationRepository>();
         services.AddScoped<ITripRepository, TripRepository>();
+    }
+
+    private static void AddCaching(IServiceCollection services, IConfiguration configuration)
+    {
+        var provider = configuration["Cache:Provider"] ?? "Memory";
+
+        if (provider.Equals("Redis", StringComparison.OrdinalIgnoreCase))
+        {
+            services.AddStackExchangeRedisCache(options =>
+            {
+                options.Configuration = configuration.GetConnectionString("Redis");
+            });
+        }
+        else
+        {
+            services.AddDistributedMemoryCache();
+        }
     }
 }
