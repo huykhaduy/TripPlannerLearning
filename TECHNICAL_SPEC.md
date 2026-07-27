@@ -1045,11 +1045,12 @@ despite the `public partial class Program` hook.
 | BCrypt.Net-Next | 4.0.3 | Infrastructure | password hashing |
 | FluentValidation.DependencyInjectionExtensions | 12.1.1 | **Application** | request-DTO validators (§7) + `AddValidatorsFromAssembly` registration |
 | Microsoft.Extensions.Caching.Abstractions | 10.0.9 | **Application** | `IDistributedCache` used by `DestinationService`'s cache-aside layer (§3.2) |
-| StackExchange.Redis | (resolved by NuGet) | **Application** | `RedisConnectionException`/`RedisTimeoutException` types only, for cache-outage detection — no direct Redis connection code in Application |
-| Microsoft.Extensions.Caching.Memory | 10.0.9 | Infrastructure | `AddDistributedMemoryCache()` — the default, in-process `IDistributedCache` implementation |
-| Microsoft.Extensions.Caching.StackExchangeRedis | (resolved by NuGet) | Infrastructure | `AddStackExchangeRedisCache()` — the opt-in Redis-backed `IDistributedCache` implementation |
+| StackExchange.Redis | 3.0.17 | **Application** | `RedisConnectionException`/`RedisTimeoutException` types only, for cache-outage detection — no direct Redis connection code in Application |
+| Microsoft.Extensions.Caching.Memory | 10.0.10 | Infrastructure | `AddDistributedMemoryCache()` — the default, in-process `IDistributedCache` implementation |
+| Microsoft.Extensions.Caching.StackExchangeRedis | 10.0.10 | Infrastructure | `AddStackExchangeRedisCache()` — the opt-in Redis-backed `IDistributedCache` implementation |
 | Microsoft.Extensions.DependencyInjection.Abstractions | 10.0.9 | Application | DI container abstractions |
-| Microsoft.Extensions.Http / Options / Configuration.Abstractions | 10.0.9 | Infrastructure | HttpClientFactory (Geoapify + Serper typed clients), options pattern |
+| Microsoft.Extensions.Http / Configuration.Abstractions | 10.0.9 | Infrastructure | HttpClientFactory (Geoapify + Serper typed clients) |
+| Microsoft.Extensions.Options | 10.0.10 | Infrastructure | options pattern |
 | Microsoft.AspNetCore.Authentication.JwtBearer | 10.0.9 | WebApi | JWT validation |
 | Swashbuckle.AspNetCore | 7.2.0 | WebApi | Swagger/OpenAPI |
 | DotNetEnv | 3.2.0 | WebApi | loads the git-ignored `.env` file into process environment variables at startup |
@@ -1091,7 +1092,13 @@ present** (`eslint` 9 flat config in `frontend/eslint.config.js`, plus
   `AddStackExchangeRedisCache()` (optional, `docker-compose.yml`'s `redis` service;
   survives restarts, shareable across instances). A cache-backend connectivity failure
   is caught and treated as a cache miss — search/attractions/details keep working,
-  just always-fresh, until the cache is reachable again. [Observed]
+  just always-fresh, until the cache is reachable again — but this is not free: the
+  Redis connection string (`ConnectionStrings__Redis` in `.env`) sets
+  `connectTimeout=1000,syncTimeout=1000,connectRetry=1` to bound each individual cache
+  operation to ~1s (StackExchange.Redis's own default is a ~5s+ backlog wait, which would
+  otherwise compound across the several cache calls one request can trigger). So a Redis
+  outage adds up to roughly 1-2s of latency per request rather than degrading instantly.
+  [Observed]
 - No message queue or file storage exists. [Observed]
 
 ### Configuration summary [Observed]

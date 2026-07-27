@@ -98,6 +98,7 @@ public static class DependencyInjection
             services.AddStackExchangeRedisCache(options =>
             {
                 options.Configuration = configuration.GetConnectionString("Redis");
+                options.InstanceName = "TripPlanner:";
             });
         }
         else

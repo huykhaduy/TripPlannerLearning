@@ -90,7 +90,15 @@ public class DestinationService : IDestinationService
     /// Reads and JSON-deserializes a <see cref="CacheEnvelope{T}"/> from
     /// <see cref="IDistributedCache"/>. A connectivity failure (Redis down or
     /// unreachable) is treated exactly like a cache miss — never surfaced to
-    /// the caller — per the "degrade gracefully" design decision.
+    /// the caller — per the "degrade gracefully" design decision. Also treats
+    /// a <see cref="JsonException"/> as a miss: <see cref="CacheRetention"/> is
+    /// 7 days, long enough for a student to reshape a DTO in
+    /// <c>Features/Destinations/Dtos/</c> between restarts, so a stale entry
+    /// that no longer matches the current shape must not 500 the request —
+    /// same treatment <see cref="IsTransientExternalFailure"/> already gives
+    /// <see cref="JsonException"/> elsewhere in this file. Deliberately NOT
+    /// applied in <see cref="SetCachedEnvelopeAsync{T}"/>: a serialize failure
+    /// on write is a real bug and should surface, not be swallowed.
     /// </summary>
     private async Task<CacheEnvelope<T>?> TryGetCachedEnvelopeAsync<T>(string key, CancellationToken cancellationToken)
     {
@@ -99,7 +107,7 @@ public class DestinationService : IDestinationService
             var bytes = await _cache.GetAsync(key, cancellationToken);
             return bytes is null ? null : JsonSerializer.Deserialize<CacheEnvelope<T>>(bytes);
         }
-        catch (Exception ex) when (IsCacheUnavailable(ex))
+        catch (Exception ex) when (IsCacheUnavailable(ex) || ex is JsonException)
         {
             return null;
         }
