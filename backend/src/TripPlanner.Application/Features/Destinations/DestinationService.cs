@@ -156,7 +156,7 @@ public class DestinationService : IDestinationService
             await SetCachedEnvelopeAsync(key, new CacheEnvelope<T>(value, _clock.GetUtcNow()), cancellationToken);
             return value;
         }
-        catch (HttpRequestException) when (stale is not null)
+        catch (Exception ex) when (IsTransientExternalFailure(ex) && !cancellationToken.IsCancellationRequested && stale is not null)
         {
             return stale.Value; // stale-better-than-down
         }
@@ -280,9 +280,11 @@ public class DestinationService : IDestinationService
         }
 
         IReadOnlyList<string> images = [];
+        var searchSucceeded = false;
         try
         {
             images = await _imageSearch.SearchImagesAsync(name, DetailsPhotoCount, cancellationToken);
+            searchSucceeded = true;
         }
         catch (Exception ex) when (IsTransientExternalFailure(ex) && !cancellationToken.IsCancellationRequested)
         {
@@ -295,13 +297,21 @@ public class DestinationService : IDestinationService
             images = [providerImage];
         }
 
-        if (images.Count == 0 && stale is not null)
+        if (searchSucceeded || images.Count > 0)
         {
-            images = stale.Value; // nothing resolved this round — prefer a stale gallery over none at all
+            // A genuine resolution — Serper answered (even with zero results,
+            // which is worth caching so we don't re-pay for the same negative),
+            // or the provider-image fallback found something. Safe to stamp as
+            // fresh.
+            await SetCachedEnvelopeAsync(key, new CacheEnvelope<IReadOnlyList<string>>(images, _clock.GetUtcNow()), cancellationToken);
+            return images;
         }
 
-        await SetCachedEnvelopeAsync(key, new CacheEnvelope<IReadOnlyList<string>>(images, _clock.GetUtcNow()), cancellationToken);
-        return images;
+        // Serper threw and nothing else resolved it — serve the stale gallery
+        // (if any) WITHOUT refreshing its timestamp, so the entry still reads
+        // as due for a retry next time instead of looking freshly-fetched for
+        // a full ImageTtl.
+        return stale?.Value ?? images;
     }
 
     /// <summary>

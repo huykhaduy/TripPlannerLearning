@@ -505,4 +505,56 @@ public class DestinationServiceTests
 
         Assert.Equal("Golden Bridge", result.Name);
     }
+
+    [Fact]
+    public async Task SearchLocationsAsync_ExpiredEntryAndProviderTimesOut_ServesStaleResult()
+    {
+        // Regression test: GetCachedAsync used to only catch HttpRequestException,
+        // so a provider TIMEOUT (TaskCanceledException) would crash the request
+        // instead of degrading to the stale entry like every other transient
+        // failure mode does.
+        var clock = new FakeClock();
+        var provider = new Mock<IDestinationProvider>();
+        provider
+            .SetupSequence(p => p.SearchLocationsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([Suggestion("Paris", "France")])
+            .ThrowsAsync(new TaskCanceledException("simulated timeout"));
+        var sut = CreateSut(CreateDb(), provider, clock);
+
+        await sut.SearchLocationsAsync("paris");
+        clock.Now += TimeSpan.FromHours(25); // past the 24 h TTL -> refetch -> times out
+
+        var result = await sut.SearchLocationsAsync("paris");
+
+        Assert.Equal("Paris", Assert.Single(result).Name); // stale entry served, no 500
+    }
+
+    [Fact]
+    public async Task GetDetailsAsync_ImageSearchFailsWithNoFallback_RetriesOnNextCallInsteadOfCachingTheFailure()
+    {
+        // Regression test: a failed Serper lookup with nothing to fall back to
+        // (no provider image, no prior stale gallery) used to still be written
+        // to the cache with a fresh timestamp, making the empty result look
+        // freshly-fetched for a full ImageTtl and blocking any retry until it
+        // expired — masking exactly the kind of outage this cache should
+        // recover from quickly.
+        var details = new DestinationDetailsDto(
+            "geo-1", "Golden Bridge", null, null, null, null, null, null, null, null); // no ImageUrl -> no fallback
+        var imageSearch = new Mock<IImageSearchProvider>();
+        imageSearch
+            .SetupSequence(p => p.SearchImagesAsync("Golden Bridge", It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new HttpRequestException("simulated outage"))
+            .ReturnsAsync((IReadOnlyList<string>)["fresh.jpg"]);
+        var sut = CreateSut(CreateDb(), ProviderReturning(details), imageSearch: imageSearch);
+
+        var first = await sut.GetDetailsAsync("geo-1");
+        Assert.Empty(first.ImageUrls ?? []); // nothing resolved this round
+
+        var second = await sut.GetDetailsAsync("geo-1"); // same instant — would be "fresh" if wrongly cached
+
+        Assert.Equal(["fresh.jpg"], second.ImageUrls);
+        imageSearch.Verify(
+            p => p.SearchImagesAsync("Golden Bridge", It.IsAny<int>(), It.IsAny<CancellationToken>()),
+            Times.Exactly(2)); // retried instead of serving the failed attempt as a cached "fresh" empty result
+    }
 }
