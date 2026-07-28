@@ -24,11 +24,19 @@ if [ ! -f "$ROOT_DIR/backend/src/TripPlanner.WebApi/.env" ]; then
   cp "$ROOT_DIR/backend/src/TripPlanner.WebApi/.env.example" "$ROOT_DIR/backend/src/TripPlanner.WebApi/.env"
 fi
 
-# 2. Start the backend API (http://localhost:5080).
+# 2. Start optional Docker services (Postgres/Redis), if Docker is available.
+#    Skips silently if it isn't — SQLite + the in-process cache remain the
+#    zero-setup defaults.
+if command -v docker &> /dev/null; then
+  echo "Starting Docker services (Postgres/Redis)…"
+  (cd "$ROOT_DIR" && docker compose up -d) || echo "  (skipped — Docker not available)"
+fi
+
+# 3. Start the backend API (http://localhost:5080).
 echo "Starting backend API…"
 (cd "$ROOT_DIR/backend" && dotnet run --project src/TripPlanner.WebApi) &
 
-# 3. Start the frontend dev server (http://localhost:5173).
+# 4. Start the frontend dev server (http://localhost:5173).
 echo "Starting frontend…"
 (cd "$ROOT_DIR/frontend" && npm run dev) &
 

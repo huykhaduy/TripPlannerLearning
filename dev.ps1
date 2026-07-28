@@ -18,7 +18,12 @@ if (-not (Test-Path "$Root/backend/src/TripPlanner.WebApi/.env")) {
     Copy-Item "$Root/backend/src/TripPlanner.WebApi/.env.example" "$Root/backend/src/TripPlanner.WebApi/.env"
 }
 
-# 2. Start each server in a new PowerShell window.
+# 2. Start optional Docker services (Postgres/Redis) via WSL, if available.
+#    Skips silently if WSL, Docker, or the daemon isn't set up — SQLite + the
+#    in-process cache remain the zero-setup defaults.
+& "$Root/dev-docker.ps1" -Root $Root
+
+# 3. Start each server in a new PowerShell window.
 Write-Host "Starting backend API  -> http://localhost:5080/swagger"
 Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$Root/backend'; dotnet run --project src/TripPlanner.WebApi"
 
