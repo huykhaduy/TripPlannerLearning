@@ -1,7 +1,9 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using TripPlanner.Application.Common.Interfaces;
+using TripPlanner.Infrastructure.Caching;
 using TripPlanner.Infrastructure.Email;
 using TripPlanner.Infrastructure.ExternalApis;
 using TripPlanner.Infrastructure.Identity;
@@ -34,8 +36,9 @@ public static class DependencyInjection
 
         // Cache backend for browse-path provider results (spec §11.2 NFR1/NFR2),
         // switchable from configuration: "Cache:Provider" = "Memory" (default) or
-        // "Redis". Both branches register IDistributedCache — DestinationService
-        // depends only on that abstraction, never on StackExchange.Redis directly.
+        // "Redis". Both branches register IDistributedCache, decorated by
+        // ResilientDistributedCache — DestinationService depends only on that
+        // abstraction and never sees StackExchange.Redis's exception types.
         AddCaching(services, configuration);
 
         // External travel data provider (typed HttpClient + bound settings).
@@ -93,5 +96,18 @@ public static class DependencyInjection
         {
             services.AddDistributedMemoryCache();
         }
+
+        // Decorate whichever IDistributedCache was just registered above with
+        // ResilientDistributedCache, so a connectivity failure (Redis
+        // down/unreachable, or a bare timeout) degrades to a cache miss/no-op
+        // instead of throwing.
+        var registration = services.Single(d => d.ServiceType == typeof(IDistributedCache));
+        services.Remove(registration);
+        services.AddSingleton<IDistributedCache>(sp =>
+        {
+            var real = (IDistributedCache)(registration.ImplementationFactory?.Invoke(sp)
+                ?? ActivatorUtilities.CreateInstance(sp, registration.ImplementationType!));
+            return new ResilientDistributedCache(real);
+        });
     }
 }

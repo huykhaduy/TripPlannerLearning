@@ -134,11 +134,13 @@ WebApi ──▶ Application ──▶ Domain
 
 - `TripPlanner.Domain` references **nothing** (no packages, no projects).
 - `TripPlanner.Application` references Domain + `FluentValidation.DependencyInjectionExtensions`
-  + `Microsoft.Extensions.Caching.Abstractions` + `StackExchange.Redis` (only for the
-  `RedisConnectionException`/`RedisTimeoutException` types used in `DestinationService`'s
-  cache-outage handling — Application never touches `ConnectionMultiplexer` or a
-  connection string) + `Microsoft.Extensions.DependencyInjection.Abstractions`.
-  It does **not** reference `Microsoft.EntityFrameworkCore` at all (confirmed by grep — zero
+  + `Microsoft.Extensions.Caching.Abstractions` + `Microsoft.Extensions.DependencyInjection.Abstractions`.
+  It does **not** reference `StackExchange.Redis`, `Microsoft.Extensions.Caching.StackExchangeRedis`,
+  or any other cache-backend package — `DestinationService` depends only on
+  `IDistributedCache` and never sees a backend-specific exception type; a connectivity
+  failure is absorbed by `ResilientDistributedCache` (Infrastructure — see the Cache
+  entry under §10 Third-party services) before it reaches Application. It does
+  **not** reference `Microsoft.EntityFrameworkCore` at all (confirmed by grep — zero
   matches in the `.csproj` or any `.cs` file under this project); the repository
   abstractions it depends on (`IRepository<T>`, `IUnitOfWork`, `IUserRepository`,
   `ITripRepository`, `IDestinationRepository`) are plain interfaces with no EF types
@@ -1043,9 +1045,9 @@ tests exist despite the `public partial class Program` hook.
 | BCrypt.Net-Next | 4.0.3 | Infrastructure | password hashing |
 | FluentValidation.DependencyInjectionExtensions | 12.1.1 | **Application** | request-DTO validators (§7) + `AddValidatorsFromAssembly` registration |
 | Microsoft.Extensions.Caching.Abstractions | 10.0.9 | **Application** | `IDistributedCache` used by `DestinationService`'s cache-aside layer (§3.2) |
-| StackExchange.Redis | 3.0.17 | **Application** | `RedisConnectionException`/`RedisTimeoutException` types only, for cache-outage detection — no direct Redis connection code in Application |
 | Microsoft.Extensions.Caching.Memory | 10.0.10 | Infrastructure | `AddDistributedMemoryCache()` — the default, in-process `IDistributedCache` implementation |
 | Microsoft.Extensions.Caching.StackExchangeRedis | 10.0.10 | Infrastructure | `AddStackExchangeRedisCache()` — the opt-in Redis-backed `IDistributedCache` implementation |
+| StackExchange.Redis | 3.0.17 | Infrastructure | `RedisConnectionException`/`RedisTimeoutException` types, caught only by `ResilientDistributedCache` — not referenced anywhere in Application |
 | Microsoft.Extensions.DependencyInjection.Abstractions | 10.0.9 | Application | DI container abstractions |
 | Microsoft.Extensions.Http / Configuration.Abstractions | 10.0.9 | Infrastructure | HttpClientFactory (Geoapify + Serper typed clients) |
 | Microsoft.Extensions.Options | 10.0.10 | Infrastructure | options pattern |
@@ -1088,15 +1090,19 @@ present** (`eslint` 9 flat config in `frontend/eslint.config.js`, plus
   switchable via `Cache:Provider` — `AddDistributedMemoryCache()` (default, in-process;
   does not survive a restart, not shared across instances) or
   `AddStackExchangeRedisCache()` (optional, `docker-compose.yml`'s `redis` service;
-  survives restarts, shareable across instances). A cache-backend connectivity failure
-  is caught and treated as a cache miss — search/attractions/details keep working,
-  just always-fresh, until the cache is reachable again — but this is not free: the
-  Redis connection string (`ConnectionStrings__Redis` in `.env`) sets
+  survives restarts, shareable across instances). Whichever backend is registered is
+  wrapped by `ResilientDistributedCache` (`TripPlanner.Infrastructure/Caching/`) — a
+  connectivity failure (Redis down/unreachable, or a bare timeout) is caught **there**
+  and degrades to a cache miss/no-op, so `DestinationService` (Application) only ever
+  sees `IDistributedCache` and never a backend-specific exception type. Search/attractions/details
+  keep working, just always-fresh, until the cache is reachable again — but this is not
+  free: the Redis connection string (`ConnectionStrings__Redis` in `.env`) sets
   `connectTimeout=1000,syncTimeout=1000,connectRetry=1` to bound each individual cache
   operation to ~1s (StackExchange.Redis's own default is a ~5s+ backlog wait, which would
   otherwise compound across the several cache calls one request can trigger). So a Redis
-  outage adds up to roughly 1-2s of latency per request rather than degrading instantly.
-  [Observed]
+  outage adds up to roughly 1-2s of latency per request rather than degrading instantly —
+  verified live: a request against an unreachable Redis returned 200 in ~2.1s with no
+  errors logged, rather than hanging or 500ing. [Observed]
 - No message queue or file storage exists. [Observed]
 
 ### Configuration summary [Observed]

@@ -2,7 +2,6 @@ using System.Collections.Concurrent;
 using System.Text.Json;
 using FluentValidation;
 using Microsoft.Extensions.Caching.Distributed;
-using StackExchange.Redis;
 using TripPlanner.Application.Common.Exceptions;
 using TripPlanner.Application.Common.Interfaces;
 using TripPlanner.Application.Common.Validation;
@@ -88,26 +87,33 @@ public class DestinationService : IDestinationService
 
     /// <summary>
     /// Reads and JSON-deserializes a <see cref="CacheEnvelope{T}"/> from
-    /// <see cref="IDistributedCache"/>. A connectivity failure (Redis down or
-    /// unreachable) is treated exactly like a cache miss — never surfaced to
-    /// the caller — per the "degrade gracefully" design decision. Also treats
-    /// a <see cref="JsonException"/> as a miss: <see cref="CacheRetention"/> is
-    /// 7 days, long enough for a student to reshape a DTO in
-    /// <c>Features/Destinations/Dtos/</c> between restarts, so a stale entry
-    /// that no longer matches the current shape must not 500 the request —
-    /// same treatment <see cref="IsTransientExternalFailure"/> already gives
-    /// <see cref="JsonException"/> elsewhere in this file. Deliberately NOT
-    /// applied in <see cref="SetCachedEnvelopeAsync{T}"/>: a serialize failure
-    /// on write is a real bug and should surface, not be swallowed.
+    /// <see cref="IDistributedCache"/>. A cache-backend connectivity failure
+    /// never reaches here — the registered <see cref="IDistributedCache"/> is
+    /// always <c>ResilientDistributedCache</c> (Infrastructure), which
+    /// degrades that to a plain miss (<c>null</c> bytes) before it gets this
+    /// far. A <see cref="JsonException"/> is still treated as a miss here:
+    /// <see cref="CacheRetention"/> is 7 days, long enough for a student to
+    /// reshape a DTO in <c>Features/Destinations/Dtos/</c> between restarts,
+    /// so a stale entry that no longer matches the current shape must not
+    /// 500 the request — same treatment <see cref="IsTransientExternalFailure"/>
+    /// already gives <see cref="JsonException"/> elsewhere in this file.
+    /// Deliberately NOT applied in <see cref="SetCachedEnvelopeAsync{T}"/>: a
+    /// serialize failure on write is a real bug and should surface, not be
+    /// swallowed.
     /// </summary>
     private async Task<CacheEnvelope<T>?> TryGetCachedEnvelopeAsync<T>(string key, CancellationToken cancellationToken)
     {
+        var bytes = await _cache.GetAsync(key, cancellationToken);
+        if (bytes is null)
+        {
+            return null;
+        }
+
         try
         {
-            var bytes = await _cache.GetAsync(key, cancellationToken);
-            return bytes is null ? null : JsonSerializer.Deserialize<CacheEnvelope<T>>(bytes);
+            return JsonSerializer.Deserialize<CacheEnvelope<T>>(bytes);
         }
-        catch (Exception ex) when (IsCacheUnavailable(ex) || ex is JsonException)
+        catch (JsonException)
         {
             return null;
         }
@@ -116,26 +122,19 @@ public class DestinationService : IDestinationService
     /// <summary>
     /// JSON-serializes and writes a <see cref="CacheEnvelope{T}"/> to
     /// <see cref="IDistributedCache"/>, retained for <see cref="CacheRetention"/>.
-    /// A connectivity failure is swallowed — the freshly-fetched value the
-    /// caller already has is still returned; this round just isn't cached.
+    /// A cache-backend connectivity failure is swallowed by
+    /// <c>ResilientDistributedCache</c> (Infrastructure) before it reaches
+    /// here — the freshly-fetched value the caller already has is still
+    /// returned regardless; this round just isn't cached.
     /// </summary>
     private async Task SetCachedEnvelopeAsync<T>(string key, CacheEnvelope<T> envelope, CancellationToken cancellationToken)
     {
-        try
-        {
-            var bytes = JsonSerializer.SerializeToUtf8Bytes(envelope);
-            await _cache.SetAsync(
-                key, bytes,
-                new DistributedCacheEntryOptions { AbsoluteExpirationRelativeToNow = CacheRetention },
-                cancellationToken);
-        }
-        catch (Exception ex) when (IsCacheUnavailable(ex))
-        {
-        }
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(envelope);
+        await _cache.SetAsync(
+            key, bytes,
+            new DistributedCacheEntryOptions { AbsoluteExpirationRelativeToNow = CacheRetention },
+            cancellationToken);
     }
-
-    private static bool IsCacheUnavailable(Exception ex) =>
-        ex is RedisConnectionException or RedisTimeoutException or TimeoutException;
 
     /// <summary>
     /// Cache-aside over the provider (NFR1/NFR2): fresh hit → no provider
