@@ -137,7 +137,7 @@ Arrange with a fresh `CreateDb()`, construct the service under test with real im
 
 - API URL: `http://localhost:5080`; frontend `.env` → `VITE_API_BASE_URL=http://localhost:5080/api`
 - JWT settings in `appsettings.json` under `"Jwt"` (Key, Issuer, Audience)
-- Database defaults to SQLite (`tripplanner.db` in the WebApi folder). Switch to PostgreSQL by setting `"Database": { "Provider": "Postgres" }` in `appsettings.Development.json` and running `docker compose up -d`.
+- Database is PostgreSQL only (no SQLite/InMemory fallback outside tests) — run `docker compose up -d` and set `ConnectionStrings__Postgres` in `.env` (see `.env.example`).
 - Destination browse-path caching (`DestinationService`) defaults to an in-process `IDistributedCache`. Switch to Redis by setting `"Cache": { "Provider": "Redis" }` in `appsettings.Development.json` and running `docker compose up -d`; the connection string comes from `.env` (`ConnectionStrings__Redis`), not `appsettings.json`.
 - Migrations apply automatically on startup via `ApplyMigrationsAsync` in `Program.cs`.
 - All environment-specific URLs and secrets are git-ignored, local-only values loaded from
@@ -145,8 +145,8 @@ Arrange with a fresh `CreateDb()`, construct the service under test with real im
   `.env.example` to `.env` and fill in real values. This includes not just the Geoapify/Serper
   API keys and SMTP credentials, but every URL that previously lived in `appsettings.json`:
   `Cors__AllowedOrigins__0`, `App__FrontendBaseUrl`, `Geoapify__BaseUrl`, `Serper__BaseUrl`,
-  and `ConnectionStrings__Postgres`. `appsettings.json` only keeps the SQLite connection
-  string and non-URL structural defaults (e.g. `Smtp:Host`/`Smtp:Port`). Nested config keys
+  and `ConnectionStrings__Postgres` (required — `appsettings.json` only keeps an empty
+  placeholder). Nested config keys
   use `__` as the separator (e.g. `Geoapify__ApiKey`), since `.env` values become process
   environment variables and ASP.NET Core's `AddEnvironmentVariables()` treats `__` as the
   section delimiter; array elements use a trailing index (`Cors__AllowedOrigins__0`).

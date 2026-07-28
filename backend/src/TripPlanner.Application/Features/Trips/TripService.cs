@@ -69,8 +69,8 @@ public class TripService : ITripService
 
         var rows = await _trips.GetSummaryRowsForUserAsync(userId, cancellationToken);
 
-        // SQLite cannot ORDER BY a DateTimeOffset column, so the CreatedAt sort
-        // happens in memory — a user's trip list is small.
+        // Sorted in memory rather than in SQL — a user's trip list is small,
+        // and this avoids re-querying CreatedAt as a separate ORDER BY.
         return rows
             .OrderByDescending(r => r.CreatedAt)
             .Select(r => r.Summary)

@@ -64,20 +64,8 @@ public static class DependencyInjection
 
     private static void AddPersistence(IServiceCollection services, IConfiguration configuration)
     {
-        // Switch providers from configuration: "Database:Provider" = "Sqlite" (default) or "Postgres".
-        var provider = configuration["Database:Provider"] ?? "Sqlite";
-
         services.AddDbContext<ApplicationDbContext>(options =>
-        {
-            if (provider.Equals("Postgres", StringComparison.OrdinalIgnoreCase))
-            {
-                options.UseNpgsql(configuration.GetConnectionString("Postgres"));
-            }
-            else
-            {
-                options.UseSqlite(configuration.GetConnectionString("Sqlite") ?? "Data Source=tripplanner.db");
-            }
-        });
+            options.UseNpgsql(configuration.GetConnectionString("Postgres")));
 
         // Generic repository + unit of work (open generic covers IRepository<ItineraryDay>,
         // IRepository<ItineraryItem> directly; entity-specific repositories are

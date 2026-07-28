@@ -3,7 +3,7 @@
   <!--
     INFRASTRUCTURE LAYER
     Implements the interfaces defined in Application using concrete technology:
-    EF Core (SQLite/Postgres), BCrypt password hashing, JWT generation, and the
+    EF Core (Postgres), BCrypt password hashing, JWT generation, and the
     external travel API client. Depends on Application (and transitively Domain).
   -->
   <ItemGroup>
@@ -12,7 +12,6 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.9" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.9" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.9" />
     <PackageReference Include="Microsoft.Extensions.Caching.StackExchangeRedis" Version="10.0.10" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.2" />

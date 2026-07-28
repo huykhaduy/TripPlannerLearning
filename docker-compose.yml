@@ -1,20 +1,14 @@
-# Optional services for students who want to practise running against "real"
-# infrastructure instead of the zero-setup defaults (SQLite, in-process cache).
-#
 # Postgres:
-#   1. docker compose up -d
-#   2. In src/TripPlanner.WebApi/appsettings.Development.json set:
-#        "Database": { "Provider": "Postgres" }
-#      and use the "Postgres" connection string already provided there.
-#   3. Re-create migrations for the Postgres provider, then `dotnet ef database update`.
+#   Required — the app has no other database. `docker compose up -d`, then set
+#   ConnectionStrings__Postgres in your .env (see .env.example; defaults here
+#   match it). Migrations apply automatically on startup via ApplyMigrationsAsync
+#   in Program.cs.
 #
 # Redis:
-#   1. docker compose up -d
-#   2. In src/TripPlanner.WebApi/appsettings.Development.json set:
+#   Optional — the in-process cache remains the zero-setup default.
+#   `docker compose up -d`, then in src/TripPlanner.WebApi/appsettings.Development.json set:
 #        "Cache": { "Provider": "Redis" }
 #      and use the "Redis" connection string already provided in .env.
-#
-# The default template runs on SQLite + an in-process cache with NO Docker required.
 services:
   postgres:
     image: postgres:17

@@ -143,8 +143,8 @@ WebApi ──▶ Application ──▶ Domain
   abstractions it depends on (`IRepository<T>`, `IUnitOfWork`, `IUserRepository`,
   `ITripRepository`, `IDestinationRepository`) are plain interfaces with no EF types
   in their signatures.
-- `TripPlanner.Infrastructure` references Application; carries EF Core providers
-  (SQLite, Npgsql), JWT, BCrypt packages, plus the repository implementations.
+- `TripPlanner.Infrastructure` references Application; carries the EF Core Npgsql
+  provider, JWT, BCrypt packages, plus the repository implementations.
 - `TripPlanner.WebApi` references Application and Infrastructure; carries
   JwtBearer, EF Design, Swashbuckle, `DotNetEnv`.
 
@@ -393,8 +393,8 @@ trip" are indistinguishable to the caller, both surfacing as 404 (NFR 6).
 **[Observed]** `GetMyTripsAsync` projects a lightweight `TripSummaryRow` per trip
 (`ITripRepository.GetSummaryRowsForUserAsync`, translated to SQL so
 `DestinationCount`/cover photo are computed by the query, not by loading every item),
-then sorts by `CreatedAt` descending **in memory** — the code comment explains SQLite
-cannot `ORDER BY` a `DateTimeOffset` column in SQL. `GetTripAsync` loads the full graph
+then sorts by `CreatedAt` descending **in memory** (a user's trip list is small, so this
+avoids a separate `ORDER BY` in the query). `GetTripAsync` loads the full graph
 read-only (`Days.Items.Destination` + `Items.Destination`) filtered by
 `(tripId, userId)`; a trip that exists but belongs to someone else is `NotFoundException`,
 same as a nonexistent id.
@@ -735,14 +735,15 @@ Between the services and the DbContext sits:
 
 ### 8.2 Provider strategy
 
-**[Observed]** `Database:Provider` config switch: `"Sqlite"` (default; connection
-string `Data Source=tripplanner.db`, also hard-coded as a fallback) or `"Postgres"`
-(Npgsql; docker-compose supplies Postgres 17 with user/password/db `tripplanner`).
+**[Observed]** PostgreSQL only (Npgsql) — no provider switch or SQLite fallback.
+`ConnectionStrings:Postgres` is required (an empty placeholder in `appsettings.json`,
+the real value supplied via `.env`); `docker-compose.yml` provides a local Postgres 17
+with user/password/db `tripplanner` matching that default.
 
 ### 8.3 Entity-relationship diagram
 
 **[Observed]** All tables, keys, and relationships below come from the single
-migration [20260612055321_InitialCreate.cs](backend/src/TripPlanner.Infrastructure/Migrations/20260612055321_InitialCreate.cs)
+migration [20260727095921_InitialCreate.cs](backend/src/TripPlanner.Infrastructure/Migrations/20260727095921_InitialCreate.cs)
 and the entity configurations in
 [Persistence/Configurations](backend/src/TripPlanner.Infrastructure/Persistence/Configurations).
 
@@ -755,62 +756,61 @@ erDiagram
     Destinations ||--o{ ItineraryItems : "referenced by (Restrict)"
 
     Users {
-        TEXT Id PK "Guid"
-        TEXT Email UK "max 256, NOT NULL"
-        TEXT PasswordHash "NOT NULL (BCrypt)"
-        TEXT DisplayName "max 100, NULL"
-        INTEGER IsEmailVerified "bool, NOT NULL"
-        TEXT CreatedAt "DateTimeOffset"
-        TEXT UpdatedAt "NULL"
+        uuid Id PK
+        varchar Email UK "max 256, NOT NULL"
+        text PasswordHash "NOT NULL (BCrypt)"
+        varchar DisplayName "max 100, NULL"
+        boolean IsEmailVerified "NOT NULL"
+        timestamptz CreatedAt ""
+        timestamptz UpdatedAt "NULL"
     }
     Trips {
-        TEXT Id PK "Guid"
-        TEXT UserId FK "NOT NULL"
-        TEXT Name "max 200, NOT NULL"
-        TEXT StartDate "DateOnly, NULL"
-        TEXT EndDate "DateOnly, NULL"
-        TEXT CreatedAt ""
-        TEXT UpdatedAt "NULL"
+        uuid Id PK
+        uuid UserId FK "NOT NULL"
+        varchar Name "max 200, NOT NULL"
+        date StartDate "NULL"
+        date EndDate "NULL"
+        timestamptz CreatedAt ""
+        timestamptz UpdatedAt "NULL"
     }
     ItineraryDays {
-        TEXT Id PK "Guid"
-        TEXT TripId FK "NOT NULL"
-        TEXT Date "DateOnly, NOT NULL"
-        INTEGER DayNumber "1-based, NOT NULL"
-        TEXT CreatedAt ""
-        TEXT UpdatedAt "NULL"
+        uuid Id PK
+        uuid TripId FK "NOT NULL"
+        date Date "NOT NULL"
+        integer DayNumber "1-based, NOT NULL"
+        timestamptz CreatedAt ""
+        timestamptz UpdatedAt "NULL"
     }
     ItineraryItems {
-        TEXT Id PK "Guid"
-        TEXT TripId FK "NOT NULL"
-        TEXT DestinationId FK "NOT NULL"
-        TEXT ItineraryDayId FK "NULL = Saved Places"
-        INTEGER SortOrder "NOT NULL"
-        TEXT CreatedAt ""
-        TEXT UpdatedAt "NULL"
+        uuid Id PK
+        uuid TripId FK "NOT NULL"
+        uuid DestinationId FK "NOT NULL"
+        uuid ItineraryDayId FK "NULL = Saved Places"
+        integer SortOrder "NOT NULL"
+        timestamptz CreatedAt ""
+        timestamptz UpdatedAt "NULL"
     }
     Destinations {
-        TEXT Id PK "Guid"
-        TEXT ProviderId UK "max 128, NOT NULL (Geoapify place_id)"
-        TEXT Name "max 300, NOT NULL"
-        TEXT Category "max 200, NULL"
-        TEXT Description "NULL"
-        TEXT ImageUrl "max 2048, NULL"
-        REAL Latitude "NULL"
-        REAL Longitude "NULL"
-        TEXT Address "NULL"
-        TEXT Website "max 2048, NULL"
-        TEXT OpeningHours "NULL"
-        TEXT CreatedAt ""
-        TEXT UpdatedAt "NULL"
+        uuid Id PK
+        varchar ProviderId UK "max 128, NOT NULL (Geoapify place_id)"
+        varchar Name "max 300, NOT NULL"
+        varchar Category "max 200, NULL"
+        text Description "NULL"
+        varchar ImageUrl "max 2048, NULL"
+        double Latitude "NULL"
+        double Longitude "NULL"
+        text Address "NULL"
+        varchar Website "max 2048, NULL"
+        text OpeningHours "NULL"
+        timestamptz CreatedAt ""
+        timestamptz UpdatedAt "NULL"
     }
 ```
 
-Column types shown are the **SQLite** affinities generated by the migration
-(`Guid`/`DateTimeOffset`/`DateOnly`/strings → `TEXT`, `bool`/`int` → `INTEGER`,
-`double` → `REAL`). Under the optional Npgsql provider the same model would map to
-native `uuid`/`timestamptz`/`date` types, but no Postgres migration exists in the
-repository. [Observed / Inferred]
+Column types shown are the **Postgres** (Npgsql) types generated by the migration —
+`Guid` → `uuid`, bounded strings → `character varying(n)`, unbounded strings →
+`text`, `bool` → `boolean`, `DateTimeOffset` → `timestamp with time zone`, `DateOnly`
+→ `date`, `double` → `double precision`. [Observed]
 
 ### 8.4 Tables in detail
 
@@ -821,50 +821,50 @@ default), `CreatedAt` (set in C# at construction), `UpdatedAt` (stamped by the
 
 #### `Users`
 
-| Column | Type (SQLite) | Nullable | Constraint |
+| Column | Type (Postgres) | Nullable | Constraint |
 |---|---|---|---|
-| `Id` | TEXT | no | PK |
-| `Email` | TEXT (256) | no | **UNIQUE** (`IX_Users_Email`) |
-| `PasswordHash` | TEXT | no | BCrypt hash, salt embedded |
-| `DisplayName` | TEXT (100) | yes | |
-| `IsEmailVerified` | INTEGER | no | starts `false` at registration; flipped to `true` by `AuthService.VerifyEmailAsync` |
-| `CreatedAt` / `UpdatedAt` | TEXT | no / yes | |
+| `Id` | uuid | no | PK |
+| `Email` | character varying(256) | no | **UNIQUE** (`IX_Users_Email`) |
+| `PasswordHash` | text | no | BCrypt hash, salt embedded |
+| `DisplayName` | character varying(100) | yes | |
+| `IsEmailVerified` | boolean | no | starts `false` at registration; flipped to `true` by `AuthService.VerifyEmailAsync` |
+| `CreatedAt` / `UpdatedAt` | timestamp with time zone | no / yes | |
 
 #### `Trips`
 
 | Column | Type | Nullable | Constraint |
 |---|---|---|---|
-| `Id` | TEXT | no | PK |
-| `UserId` | TEXT | no | FK → `Users.Id`, **ON DELETE CASCADE**; indexed (`IX_Trips_UserId`) |
-| `Name` | TEXT (200) | no | |
-| `StartDate` / `EndDate` | TEXT (DateOnly) | yes | start ≤ end enforced only in C# (`Trip.SetDates`), **not** by a DB check constraint |
-| `CreatedAt` / `UpdatedAt` | TEXT | no / yes | |
+| `Id` | uuid | no | PK |
+| `UserId` | uuid | no | FK → `Users.Id`, **ON DELETE CASCADE**; indexed (`IX_Trips_UserId`) |
+| `Name` | character varying(200) | no | |
+| `StartDate` / `EndDate` | date | yes | start ≤ end enforced only in C# (`Trip.SetDates`), **not** by a DB check constraint |
+| `CreatedAt` / `UpdatedAt` | timestamp with time zone | no / yes | |
 
 #### `ItineraryDays`
 
 | Column | Type | Nullable | Constraint |
 |---|---|---|---|
-| `Id` | TEXT | no | PK |
-| `TripId` | TEXT | no | FK → `Trips.Id`, **ON DELETE CASCADE**; indexed (`IX_ItineraryDays_TripId`) |
-| `Date` | TEXT (DateOnly) | no | no uniqueness — nothing stops two day rows with the same date in one trip [Observed gap] |
-| `DayNumber` | INTEGER | no | 1-based display number (per entity comment); not constrained |
-| `CreatedAt` / `UpdatedAt` | TEXT | no / yes | |
+| `Id` | uuid | no | PK |
+| `TripId` | uuid | no | FK → `Trips.Id`, **ON DELETE CASCADE**; indexed (`IX_ItineraryDays_TripId`) |
+| `Date` | date | no | no uniqueness — nothing stops two day rows with the same date in one trip [Observed gap] |
+| `DayNumber` | integer | no | 1-based display number (per entity comment); not constrained |
+| `CreatedAt` / `UpdatedAt` | timestamp with time zone | no / yes | |
 
 #### `Destinations` (cache of external-provider data)
 
 | Column | Type | Nullable | Constraint |
 |---|---|---|---|
-| `Id` | TEXT | no | PK (internal Guid, distinct from the provider's id) |
-| `ProviderId` | TEXT (128) | no | **UNIQUE** (`IX_Destinations_ProviderId`) — one row per external place |
-| `Name` | TEXT (300) | no | |
-| `Category` | TEXT (200) | yes | |
-| `Description` | TEXT | yes | |
-| `ImageUrl` | TEXT (2048) | yes | |
-| `Latitude` / `Longitude` | REAL | yes | |
-| `Address` | TEXT | yes | |
-| `Website` | TEXT (2048) | yes | |
-| `OpeningHours` | TEXT | yes | free-text, not structured |
-| `CreatedAt` / `UpdatedAt` | TEXT | no / yes | |
+| `Id` | uuid | no | PK (internal Guid, distinct from the provider's id) |
+| `ProviderId` | character varying(128) | no | **UNIQUE** (`IX_Destinations_ProviderId`) — one row per external place |
+| `Name` | character varying(300) | no | |
+| `Category` | character varying(200) | yes | |
+| `Description` | text | yes | |
+| `ImageUrl` | character varying(2048) | yes | |
+| `Latitude` / `Longitude` | double precision | yes | |
+| `Address` | text | yes | |
+| `Website` | character varying(2048) | yes | |
+| `OpeningHours` | text | yes | free-text, not structured |
+| `CreatedAt` / `UpdatedAt` | timestamp with time zone | no / yes | |
 
 Note the entity/DTO mismatch: `DestinationSummaryDto` exposes a `Rating`, but no
 rating column exists — ratings would come straight from the provider response and are
@@ -874,12 +874,12 @@ never persisted. [Observed]
 
 | Column | Type | Nullable | Constraint |
 |---|---|---|---|
-| `Id` | TEXT | no | PK |
-| `TripId` | TEXT | no | FK → `Trips.Id`, **CASCADE**; indexed |
-| `DestinationId` | TEXT | no | FK → `Destinations.Id`, **RESTRICT** (a destination in use cannot be deleted); indexed |
-| `ItineraryDayId` | TEXT | yes | FK → `ItineraryDays.Id`, **SET NULL** (deleting a day returns its items to Saved Places). `NULL` = the "Saved Places" bucket |
-| `SortOrder` | INTEGER | no | visit sequence within a day/bucket; **no unique index** — duplicate sort values are possible at the DB level. `TripService.Resequence` keeps this dense (0..n) per bucket as an **application-level** invariant (B18) after every add/reorder/move/remove, but nothing in the schema itself prevents a collision |
-| `CreatedAt` / `UpdatedAt` | TEXT | no / yes | |
+| `Id` | uuid | no | PK |
+| `TripId` | uuid | no | FK → `Trips.Id`, **CASCADE**; indexed |
+| `DestinationId` | uuid | no | FK → `Destinations.Id`, **RESTRICT** (a destination in use cannot be deleted); indexed |
+| `ItineraryDayId` | uuid | yes | FK → `ItineraryDays.Id`, **SET NULL** (deleting a day returns its items to Saved Places). `NULL` = the "Saved Places" bucket |
+| `SortOrder` | integer | no | visit sequence within a day/bucket; **no unique index** — duplicate sort values are possible at the DB level. `TripService.Resequence` keeps this dense (0..n) per bucket as an **application-level** invariant (B18) after every add/reorder/move/remove, but nothing in the schema itself prevents a collision |
+| `CreatedAt` / `UpdatedAt` | timestamp with time zone | no / yes | |
 
 **Unique index:** `IX_ItineraryItems_ItineraryDayId_DestinationId` — a destination may
 appear at most once *per scheduled day*. Because `ItineraryDayId` is nullable and SQL
@@ -891,16 +891,15 @@ wouldn't catch it. [Observed / Inferred]
 
 ### 8.5 Migrations, seeding, provider notes
 
-**[Observed]** `20260612055321_InitialCreate` is still the **only** migration; it
+**[Observed]** `20260727095921_InitialCreate` is still the **only** migration; it
 creates all five tables and seven indexes, and its `Down` drops them. No schema change
 was needed for the email-verification feature (it reuses the pre-existing
 `IsEmailVerified` column) or for the Repository/UnitOfWork rewrite (a pure
 Application/Infrastructure-layer refactor with no entity changes). There is no seed
 data. Migrations are applied automatically at startup by `ApplyMigrationsAsync` in
 [Program.cs:102](backend/src/TripPlanner.WebApi/Program.cs:102) (only when pending
-migrations exist). The migration was scaffolded against SQLite; docker-compose
-comments note that switching to Postgres requires re-creating migrations for that
-provider.
+migrations exist). The migration is scaffolded against Postgres (Npgsql) — there is
+no SQLite provider or fallback anywhere in the project.
 
 ---
 
@@ -1025,8 +1024,8 @@ Note the InMemory provider does **not** enforce the unique indexes or FK behavio
 described in §8 (and throws a different exception shape on a PK collision than the
 real SQL providers do — see §8.1), so the concurrency catch/retry paths in
 `AuthService`/`TripService`/`UnitOfWork` are **not exercised by `dotnet test`** and
-must be reasoned about directly against SQLite/Postgres. No integration tests exist
-despite the `public partial class Program` hook.
+must be reasoned about directly against the real Postgres provider. No integration
+tests exist despite the `public partial class Program` hook.
 
 ---
 
@@ -1037,8 +1036,7 @@ despite the `public partial class Program` hook.
 | Package | Version | Used by | Purpose |
 |---|---|---|---|
 | Microsoft.EntityFrameworkCore | 10.0.9 | Infrastructure only | ORM core — **no longer an Application-layer dependency** (confirmed: zero references to `Microsoft.EntityFrameworkCore` in `TripPlanner.Application.csproj` or any `.cs` file under that project) since the Repository/UnitOfWork rewrite retired `IApplicationDbContext` |
-| Microsoft.EntityFrameworkCore.Sqlite | 10.0.9 | Infrastructure | default DB provider |
-| Npgsql.EntityFrameworkCore.PostgreSQL | 10.0.2 | Infrastructure | optional Postgres provider |
+| Npgsql.EntityFrameworkCore.PostgreSQL | 10.0.2 | Infrastructure | the only DB provider — no SQLite |
 | Microsoft.EntityFrameworkCore.Design | 10.0.9 | Infrastructure, WebApi | `dotnet ef` tooling |
 | System.IdentityModel.Tokens.Jwt | 8.19.1 | Infrastructure | JWT creation/validation (both access tokens and email-verification tokens) |
 | System.Security.Cryptography.Xml | 10.0.9 | Infrastructure | (transitive-pin; no direct usage found in code) |
@@ -1085,7 +1083,7 @@ present** (`eslint` 9 flat config in `frontend/eslint.config.js`, plus
   (`SmtpEmailSender`), for the F4/US2 verification email; requires a Google Account App
   Password (`Smtp__User`/`Smtp__AppPassword` in `.env`). `SmtpEmailSender` silently
   no-ops (no send, no throw) when unconfigured. [Observed]
-- **PostgreSQL via Docker** — optional, off by default. [Observed]
+- **PostgreSQL via Docker** — required, the app has no other database. [Observed]
 - **Cache**: `IDistributedCache` backs `DestinationService`'s cache-aside layer,
   switchable via `Cache:Provider` — `AddDistributedMemoryCache()` (default, in-process;
   does not survive a restart, not shared across instances) or

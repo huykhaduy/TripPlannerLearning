@@ -20,7 +20,7 @@ by following the same patterns.
 |--------------|-----------------------------------------------------------|
 | Backend      | ASP.NET Core Web API (.NET 10), EF Core, JWT, xUnit       |
 | Frontend     | React 19 + TypeScript, Vite, React Router, axios          |
-| Database     | **SQLite** by default (no setup) — PostgreSQL optional     |
+| Database     | **PostgreSQL** — required, run via Docker or your own instance |
 | External API | Geoapify for destination data  |
 
 ---
@@ -56,7 +56,7 @@ WebApi ──▶ Application ──▶ Domain
 
 - [.NET 10 SDK](https://dotnet.microsoft.com/download)
 - [Node.js 20+](https://nodejs.org/) and npm
-- (Optional) [Docker](https://www.docker.com/) — only if you switch to PostgreSQL
+- [Docker](https://www.docker.com/) — required to run PostgreSQL locally (or point at your own Postgres instance)
 - A [Geoapify API key](https://myprojects.geoapify.com/) — free, needed for Features 1 & 2
 
 ---
@@ -65,7 +65,7 @@ WebApi ──▶ Application ──▶ Domain
 
 ### Quick start (run both servers at once)
 
-After the **one-time** database setup below (creating the initial EF migration), you
+After the **one-time** setup below (copying `.env` and starting Postgres), you
 can launch the API and frontend together from the repo root:
 
 ```bash
@@ -84,24 +84,24 @@ cd backend
 dotnet restore
 dotnet build
 
-# API keys (Geoapify, Serper) — copy the template and fill in your own:
+# API keys (Geoapify, Serper) and the Postgres connection string — copy the
+# template and fill in your own (the Postgres default already matches
+# docker-compose.yml's credentials, so it works as-is):
 cp src/TripPlanner.WebApi/.env.example src/TripPlanner.WebApi/.env
 
-# Install the EF Core CLI once, if you don't have it:
+# Start Postgres — the app has no other database:
+docker compose up -d
+
+# Install the EF Core CLI once, if you don't have it (needed later, for any
+# new migrations you add while implementing the Trips/Destinations features):
 dotnet tool install --global dotnet-ef
 
-# Create the initial database schema (run once):
-dotnet ef migrations add InitialCreate \
-  --project src/TripPlanner.Infrastructure \
-  --startup-project src/TripPlanner.WebApi
-
-# Run the API (auto-applies migrations on startup):
+# Run the API (applies the existing migrations automatically on startup):
 dotnet run --project src/TripPlanner.WebApi
 ```
 
 The API starts at **http://localhost:5080** with Swagger UI at
-**http://localhost:5080/swagger**. A `tripplanner.db` SQLite file is created in the
-WebApi folder.
+**http://localhost:5080/swagger**.
 
 ### 2. Frontend
 
@@ -133,20 +133,6 @@ dotnet test
    is a stub. That's your first task. 🙂
 
 ---
-
-## Switching to PostgreSQL (optional)
-
-1. `docker compose up -d` (starts Postgres on port 5432).
-2. In `backend/src/TripPlanner.WebApi/appsettings.Development.json`, add:
-   ```json
-   { "Database": { "Provider": "Postgres" } }
-   ```
-3. The `ConnectionStrings__Postgres` connection string lives in `.env` (see
-   `.env.example`), not `appsettings.json` — its default already matches
-   `docker-compose.yml`'s credentials, so no change is needed unless you edit
-   the compose file.
-4. Delete the SQLite `Migrations` folder, re-run `dotnet ef migrations add InitialCreate`
-   (providers generate different SQL), then `dotnet run`.
 
 ## Switching to Redis (optional)
 
