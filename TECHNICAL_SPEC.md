@@ -1101,9 +1101,9 @@ present** (`eslint` 9 flat config in `frontend/eslint.config.js`, plus
 
 ### Configuration summary [Observed]
 
-`appsettings.json` now keeps only the SQLite connection string and non-URL structural
-defaults: `Logging` (EF command logging at Warning), `AllowedHosts: *`,
-`Database:Provider = Sqlite`, `ConnectionStrings:Sqlite`, `Jwt`
+`appsettings.json` now keeps only non-URL structural defaults: `Logging` (EF command
+logging at Warning), `AllowedHosts: *`, an empty `ConnectionStrings:Postgres`
+placeholder (required, filled in via `.env`), `Jwt`
 (issuer/audience/key/expiry — the key is still a **committed dev placeholder**,
 `"CHANGE_ME_dev_only_signing_key_min_32_chars_long!"`), empty `Geoapify:ApiKey` /
 `Serper:ApiKey` placeholders, and `Smtp:Host`/`Smtp:Port` (`smtp.gmail.com`/`587`).
