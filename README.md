@@ -129,8 +129,12 @@ dotnet test
 1. Start the API and open Swagger.
 2. `POST /api/auth/register` with `{ "email": "me@example.com", "password": "password123" }`.
 3. Copy the returned `accessToken`, click **Authorize** in Swagger, and paste it.
-4. Call `GET /api/trips` — it returns **501 Not Implemented** because `TripService`
-   is a stub. That's your first task. 🙂
+4. Call `POST /api/trips` with `{ "name": "My trip" }`, then `GET /api/trips` — both
+   work end to end in this repo (Trips, like Auth, is already implemented). If
+   you're picking up a fresh copy of the template where `TripService` is still a
+   stub, this same call returns **501 Not Implemented** instead — that's the signal
+   to start implementing it, following `AuthService.cs`/`AuthController.cs` as the
+   reference pattern.
 
 ---
 
