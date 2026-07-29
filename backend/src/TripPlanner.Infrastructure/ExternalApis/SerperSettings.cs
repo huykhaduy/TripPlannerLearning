@@ -3,7 +3,7 @@ namespace TripPlanner.Infrastructure.ExternalApis;
 /// <summary>
 /// Bound from the "Serper" configuration section (options pattern, same as
 /// <see cref="GeoapifySettings"/>). The ApiKey lives in the git-ignored
-/// appsettings.Development.local.json — never in a tracked file.
+/// .env file — never in a tracked file.
 /// </summary>
 public class SerperSettings
 {

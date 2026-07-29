@@ -14,8 +14,10 @@ authoritative deep reference: Part A documents exactly what the current code doe
 phase-by-phase implementation roadmap for the unimplemented features — consult it before
 making a design decision (caching strategy, day-regeneration algorithm, sort-order
 semantics, etc.) that isn't spelled out in ASSIGNMENT.md. Feature 4 (Auth) is the
-complete reference slice; the rest are stubs (`NotImplementedException` / 501) the
-student implements incrementally.
+complete reference slice; Destination Suggestion/Details and Trip Planner are now also
+fully implemented (no remaining `NotImplementedException` stubs in `Application`) —
+`ExceptionHandlingMiddleware`'s 501 mapping stays in place for any new feature work that
+introduces one, but nothing currently throws it.
 
 ## Commands
 
@@ -68,13 +70,13 @@ WebApi ──▶ Application ──▶ Domain
 ```
 
 - **Domain** — entities (`Trip`, `ItineraryDay`, `ItineraryItem`, `Destination`, `User`). No framework dependencies.
-- **Application** — service interfaces (`ITripService`, `IAuthService`, etc.) and implementations. Defines `IApplicationDbContext`, `IPasswordHasher`, `IJwtTokenGenerator`, `ICurrentUserService`, `IDestinationProvider`. Depends only on Domain.
-- **Infrastructure** — EF Core `ApplicationDbContext`, JWT token generation, BCrypt, `GeoapifyClient`. Implements Application interfaces.
-- **WebApi** — controllers, middleware (`ExceptionHandlingMiddleware`), DI composition root. Registers all layers via `AddApplication()` / `AddInfrastructure()`.
+- **Application** — service interfaces (`ITripService`, `IAuthService`, etc.) and implementations. Defines `IRepository<T>`/`IUnitOfWork` (generic persistence abstraction — there is no `IApplicationDbContext`), `IPasswordHasher`, `IJwtTokenGenerator`, `ICurrentUserService`, `IDestinationProvider`. Depends only on Domain.
+- **Infrastructure** — EF Core `ApplicationDbContext`, repositories, JWT token generation, BCrypt, `GeoapifyClient`. Implements Application interfaces that are technology-specific but not tied to the HTTP pipeline.
+- **WebApi** — controllers, middleware (`ExceptionHandlingMiddleware`), DI composition root. Registers all layers via `AddApplication()` / `AddInfrastructure()` / `AddWebApi()`. `AddWebApi()` (`WebApi/DependencyInjection.cs`) is the one exception to "Infrastructure implements Application interfaces": `ICurrentUserService` needs `IHttpContextAccessor`, an ASP.NET Core hosting concern, so its implementation (`WebApi/Services/CurrentUserService.cs`) and registration live in WebApi, not Infrastructure.
 
 ### Key patterns
 
-- **DI registration**: each layer exposes an extension method (`AddApplication()`, `AddInfrastructure()`) — `Program.cs` stays small.
+- **DI registration**: each layer exposes an extension method (`AddApplication()`, `AddInfrastructure()`, `AddWebApi()`) — `Program.cs` stays small and just calls all three plus framework setup (auth, CORS, Swagger).
 - **Current user**: inject `ICurrentUserService` and call `GetRequiredUserId()`. Never trust a resource ID alone — always filter by `UserId`.
 - **Exceptions**: throw from the Application layer; `ExceptionHandlingMiddleware` maps them to HTTP status codes:
   | Exception | HTTP |
@@ -93,10 +95,12 @@ WebApi ──▶ Application ──▶ Domain
 
 ```
 Application/Features/
-  Auth/               ← reference implementation (complete)
-  Destinations/       ← DestinationService.cs (student impl)
-  Trips/              ← TripService.cs (student impl)
+  Auth/               ← reference implementation
+  Destinations/       ← DestinationService.cs
+  Trips/              ← TripService.cs
 ```
+
+All three are fully implemented (Auth is the canonical worked example to study first, not the only complete one).
 
 Each feature folder holds: the service implementation, an interface, and a `Dtos/` subfolder.
 
@@ -135,22 +139,29 @@ Arrange with a fresh `CreateDb()`, construct the service under test with real im
 
 ## Configuration
 
+- **There is no `appsettings.json`/`appsettings.Development.json`** — all configuration is either a
+  C# default baked into a settings class (`JwtSettings`, `SmtpSettings`, `GeoapifySettings`,
+  `SerperSettings`, all in `TripPlanner.Infrastructure`) or an override in the git-ignored
+  `backend/src/TripPlanner.WebApi/.env`, loaded via `DotNetEnv.Env.Load()` in `Program.cs` before
+  `WebApplication.CreateBuilder` runs. Copy `.env.example` to `.env` and fill in real values.
+  Nested config keys use `__` as the separator (e.g. `Geoapify__ApiKey` → `Geoapify:ApiKey`),
+  since `.env` values become process environment variables and ASP.NET Core's
+  `AddEnvironmentVariables()` treats `__` as the section delimiter; array elements use a
+  trailing index (`Cors__AllowedOrigins__0`).
 - API URL: `http://localhost:5080`; frontend `.env` → `VITE_API_BASE_URL=http://localhost:5080/api`
-- JWT settings in `appsettings.json` under `"Jwt"` (Key, Issuer, Audience)
-- Database is PostgreSQL only (no SQLite/InMemory fallback outside tests) — run `docker compose up -d` and set `ConnectionStrings__Postgres` in `.env` (see `.env.example`).
-- Destination browse-path caching (`DestinationService`) defaults to an in-process `IDistributedCache`. Switch to Redis by setting `"Cache": { "Provider": "Redis" }` in `appsettings.Development.json` and running `docker compose up -d`; the connection string comes from `.env` (`ConnectionStrings__Redis`), not `appsettings.json`.
+- JWT: `Jwt__Issuer`/`Jwt__Audience`/`Jwt__ExpiryMinutes` are optional overrides (defaults live in
+  `JwtSettings.cs`: `TripPlanner`/`TripPlannerClient`/`60`). `Jwt__Key` is the one required,
+  no-default value — a defaulted signing key would defeat JWT security, so `Program.cs` throws at
+  startup if it's unset rather than falling back, unlike the URL fallbacks below.
+- Database is PostgreSQL only (no SQLite/InMemory fallback outside tests) — required, no default:
+  run `docker compose up -d` and set `ConnectionStrings__Postgres` in `.env` (see `.env.example`).
+- Destination browse-path caching (`DestinationService`) defaults to an in-process `IDistributedCache`.
+  Switch to Redis by setting `Cache__Provider=Redis` in `.env` and running `docker compose up -d`;
+  the connection string comes from `ConnectionStrings__Redis` in the same file.
 - Migrations apply automatically on startup via `ApplyMigrationsAsync` in `Program.cs`.
-- All environment-specific URLs and secrets are git-ignored, local-only values loaded from
-  `backend/src/TripPlanner.WebApi/.env` via `DotNetEnv.Env.Load()` in `Program.cs` — copy
-  `.env.example` to `.env` and fill in real values. This includes not just the Geoapify/Serper
-  API keys and SMTP credentials, but every URL that previously lived in `appsettings.json`:
-  `Cors__AllowedOrigins__0`, `App__FrontendBaseUrl`, `Geoapify__BaseUrl`, `Serper__BaseUrl`,
-  and `ConnectionStrings__Postgres` (required — `appsettings.json` only keeps an empty
-  placeholder). Nested config keys
-  use `__` as the separator (e.g. `Geoapify__ApiKey`), since `.env` values become process
-  environment variables and ASP.NET Core's `AddEnvironmentVariables()` treats `__` as the
-  section delimiter; array elements use a trailing index (`Cors__AllowedOrigins__0`).
-  Every one of these has a matching `?? "localhost default"` fallback in code, so the app
-  still runs with no `.env` overrides at all — see `AppUrlProvider.cs`,
-  `DependencyInjection.cs` (Geoapify/Serper `HttpClient` setup), and `Program.cs`'s CORS
-  policy.
+- Geoapify/Serper API keys and SMTP credentials are required secrets with no default (empty string
+  in the settings classes) — must come from `.env`. `Cors__AllowedOrigins__0`, `App__FrontendBaseUrl`,
+  `Geoapify__BaseUrl`, `Serper__BaseUrl`, `Smtp__Host`/`Smtp__Port` all have a matching
+  `?? "localhost default"` (or class-level default) in code, so the app still runs with an empty
+  `.env` for those — see `AppUrlProvider.cs`, `DependencyInjection.cs` (Geoapify/Serper `HttpClient`
+  setup), `SmtpSettings.cs`, and `Program.cs`'s CORS policy.

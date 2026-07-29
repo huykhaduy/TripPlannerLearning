@@ -4,11 +4,11 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using TripPlanner.Application;
-using TripPlanner.Application.Common.Interfaces;
 using TripPlanner.Infrastructure;
+using TripPlanner.Infrastructure.Identity;
 using TripPlanner.Infrastructure.Persistence;
+using TripPlanner.WebApi;
 using TripPlanner.WebApi.Middleware;
-using TripPlanner.WebApi.Services;
 
 // Local overrides (API keys etc.) — git-ignored .env file, loaded into process
 // environment variables before the builder reads them. Config keys use "__" to
@@ -25,17 +25,14 @@ var builder = WebApplication.CreateBuilder(args);
 // ---------------------------------------------------------------------------
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
-
-// The Web API supplies "who is the current user?" by reading JWT claims.
-builder.Services.AddHttpContextAccessor();
-builder.Services.AddScoped<ICurrentUserService, CurrentUserService>();
+builder.Services.AddWebApi();
 
 builder.Services.AddControllers();
 
 // ---------------------------------------------------------------------------
 // 2. Authentication — validate the JWTs issued by JwtTokenGenerator.
 // ---------------------------------------------------------------------------
-var jwtSection = builder.Configuration.GetSection("Jwt");
+var jwtSection = builder.Configuration.GetSection(JwtSettings.SectionName);
 var signingKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSection["Key"]!));
 
 builder.Services
@@ -48,8 +45,8 @@ builder.Services
             ValidateAudience = true,
             ValidateLifetime = true,
             ValidateIssuerSigningKey = true,
-            ValidIssuer = jwtSection["Issuer"],
-            ValidAudience = jwtSection["Audience"],
+            ValidIssuer = jwtSection["Issuer"] ?? JwtSettings.DefaultIssuer,
+            ValidAudience = jwtSection["Audience"] ?? JwtSettings.DefaultAudience,
             IssuerSigningKey = signingKey,
             ClockSkew = TimeSpan.Zero,
         };

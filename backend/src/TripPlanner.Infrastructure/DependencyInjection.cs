@@ -42,11 +42,15 @@ public static class DependencyInjection
         AddCaching(services, configuration);
 
         // External travel data provider (typed HttpClient + bound settings).
+        // Explicit timeout: search/attractions/details all sit in the request
+        // path a user is actively waiting on, so a hung Geoapify call shouldn't
+        // be allowed to ride the ~100s HttpClient default.
         services.Configure<GeoapifySettings>(configuration.GetSection(GeoapifySettings.SectionName));
         services.AddHttpClient<IDestinationProvider, GeoapifyClient>(client =>
         {
             var baseUrl = configuration["Geoapify:BaseUrl"] ?? "https://api.geoapify.com/";
             client.BaseAddress = new Uri(baseUrl);
+            client.Timeout = TimeSpan.FromSeconds(10);
         });
 
         // Image search, used to fill in attraction thumbnails the destination

@@ -108,7 +108,7 @@ backend/
     TripPlanner.Domain/            # entities, DomainException — zero dependencies
     TripPlanner.Application/       # services, DTOs, interfaces, app exceptions
     TripPlanner.Infrastructure/    # EF Core, JWT, BCrypt, Geoapify client, migrations
-    TripPlanner.WebApi/            # controllers, middleware, Program.cs, appsettings
+    TripPlanner.WebApi/            # controllers, middleware, Program.cs (no appsettings.json — see §10 Configuration summary)
   tests/
     TripPlanner.Application.Tests/ # Auth/, Trips/, Destinations/, Repositories/, Identity/ — 5 classes, 77 tests
 frontend/
@@ -738,8 +738,8 @@ Between the services and the DbContext sits:
 ### 8.2 Provider strategy
 
 **[Observed]** PostgreSQL only (Npgsql) — no provider switch or SQLite fallback.
-`ConnectionStrings:Postgres` is required (an empty placeholder in `appsettings.json`,
-the real value supplied via `.env`); `docker-compose.yml` provides a local Postgres 17
+`ConnectionStrings:Postgres` is required, no default, supplied only via `.env`
+(`ConnectionStrings__Postgres`); `docker-compose.yml` provides a local Postgres 17
 with user/password/db `tripplanner` matching that default.
 
 ### 8.3 Entity-relationship diagram
@@ -982,9 +982,9 @@ exception from any later stage is converted to ProblemDetails.
 - Scheme: JWT Bearer (symmetric HMAC-SHA256).
 - Token claims: `sub` (user id), `email`, `jti`; issuer/audience/lifetime/signing-key
   all validated; `ClockSkew = 0`.
-- Config: `Jwt` section — Issuer `TripPlanner`, Audience `TripPlannerClient`,
-  60-minute expiry, and a **development signing key committed to appsettings.json**
-  (`"CHANGE_ME_dev_only_signing_key_min_32_chars_long!"`).
+- Config: `Jwt` section — Issuer `TripPlanner`, Audience `TripPlannerClient`, 60-minute
+  expiry all default in `JwtSettings.cs` (overridable via `.env`); the signing key
+  (`Jwt__Key`) has no default and is required-from-`.env` only, never committed.
 - Authorization: the single `[Authorize]` attribute on `TripsController`. No roles,
   no policies, no claims-based rules anywhere.
 
@@ -1107,31 +1107,34 @@ present** (`eslint` 9 flat config in `frontend/eslint.config.js`, plus
 
 ### Configuration summary [Observed]
 
-`appsettings.json` now keeps only non-URL structural defaults: `Logging` (EF command
-logging at Warning), `AllowedHosts: *`, an empty `ConnectionStrings:Postgres`
-placeholder (required, filled in via `.env`), `Jwt`
-(issuer/audience/key/expiry — the key is still a **committed dev placeholder**,
-`"CHANGE_ME_dev_only_signing_key_min_32_chars_long!"`), empty `Geoapify:ApiKey` /
-`Serper:ApiKey` placeholders, and `Smtp:Host`/`Smtp:Port` (`smtp.gmail.com`/`587`).
-`appsettings.Development.json` only raises ASP.NET Core log verbosity.
+**There is no `appsettings.json` or `appsettings.Development.json`** — both were
+removed. Every setting is now either a C# default on a settings class
+(`JwtSettings`/`SmtpSettings`/`GeoapifySettings`/`SerperSettings` in
+`TripPlanner.Infrastructure`, plus the `?? "Memory"` in `AddCaching`) or an override in
+the git-ignored `.env`, loaded via `DotNetEnv.Env.Load()` at the top of `Program.cs`
+before the configuration builder runs. Concretely:
 
-**Every URL and secret has moved to `.env`** (git-ignored; see
-[.env.example](backend/src/TripPlanner.WebApi/.env.example)), loaded via
-`DotNetEnv.Env.Load()` at the top of `Program.cs` before the configuration builder
-runs: `Geoapify__ApiKey`, `Serper__ApiKey`, `Smtp__User`, `Smtp__AppPassword`,
-`Cors__AllowedOrigins__0`, `App__FrontendBaseUrl`, `Geoapify__BaseUrl`,
-`Serper__BaseUrl`, `ConnectionStrings__Postgres`. This is a change from an earlier
-version of the codebase where `Cors:AllowedOrigins`, `App:FrontendBaseUrl`,
-`Geoapify:BaseUrl`, `Serper:BaseUrl`, and `ConnectionStrings:Postgres` lived directly
-in `appsettings.json`. Every one of these env vars has a matching
-`?? "localhost default"` fallback in code (`AppUrlProvider.cs`,
-`Infrastructure/DependencyInjection.cs`'s Geoapify/Serper `HttpClient` setup,
-`Program.cs`'s CORS policy), so the app still runs with no `.env` file at all — Geoapify
-search/attractions calls would just fail with an invalid/empty API key rather than the
-app failing to start. Secrets management otherwise: none — the JWT dev key and
-docker-compose Postgres password are still committed in plain text. Frontend:
-`VITE_API_BASE_URL` env var (read in `client.ts`, default
-`http://localhost:5080/api`).
+- **Required, no default** (app throws/fails without them): `ConnectionStrings__Postgres`,
+  `Jwt__Key` — a defaulted DB connection or signing key would be meaningless/unsafe, so
+  these deliberately have no fallback.
+- **Required secrets with an empty-string default** (feature degrades rather than
+  crashing if unset — e.g. Geoapify calls fail server-side, `SerperImageClient`
+  short-circuits, `SmtpEmailSender` no-ops): `Geoapify__ApiKey`, `Serper__ApiKey`,
+  `Smtp__User`, `Smtp__AppPassword`.
+- **Optional overrides with a working code default** (app runs unchanged if unset):
+  `Cors__AllowedOrigins__0`, `App__FrontendBaseUrl`, `Geoapify__BaseUrl`,
+  `Serper__BaseUrl` (all `?? "localhost/https default"` in `AppUrlProvider.cs` /
+  `Infrastructure/DependencyInjection.cs` / `Program.cs`'s CORS policy), plus
+  `Jwt__Issuer`/`Jwt__Audience`/`Jwt__ExpiryMinutes`, `Smtp__Host`/`Smtp__Port`, and
+  `Cache__Provider` (defaults baked into the settings classes / `AddCaching`'s
+  `?? "Memory"`).
+
+So the app still boots with a `.env` containing only `ConnectionStrings__Postgres` and
+`Jwt__Key` — every other value falls back to a sensible default, and Geoapify/Serper/SMTP
+simply degrade gracefully rather than blocking startup. Secrets management otherwise:
+none — the docker-compose Postgres password is still committed in plain text (dev-only,
+local Docker network). Frontend: `VITE_API_BASE_URL` env var (read in `client.ts`,
+default `http://localhost:5080/api`).
 
 ---
 
@@ -1461,7 +1464,7 @@ explicit.
 
 | Phase | Deliverable | Spec | Files touched | Depends on |
 |---|---|---|---|---|
-| **0. Orientation** | App runs; register/login verified; Geoapify API key obtained (free at https://myprojects.geoapify.com/) and placed in `appsettings.Development.json` | — | config only | — |
+| **0. Orientation** | App runs; register/login verified; Geoapify API key obtained (free at https://myprojects.geoapify.com/) and placed in `.env` (`Geoapify__ApiKey`) | — | config only | — |
 | **1. F3 backend core** 🔴 | `TripService`: GetMyTrips, GetTrip, Create, Update (day regeneration), Remove + unit tests. AddDestination with a mocked provider test | §11.1 | [TripService.cs](backend/src/TripPlanner.Application/Features/Trips/TripService.cs), new `TripServiceTests.cs` | Phase 0 |
 | **2. Details provider call** | `GeoapifyClient.GetDestinationDetailsAsync` only — unblocks AddDestination end-to-end | §11.2 | [GeoapifyClient.cs](backend/src/TripPlanner.Infrastructure/ExternalApis/GeoapifyClient.cs) | 0 |
 | **3. F3 frontend core** 🔴 | Trips list/detail UI, create/rename/dates, remove; types + `api/trips.ts` | §11.5 | [TripsPage.tsx](frontend/src/features/trips/TripsPage.tsx), types.ts, new api file | 1, 2 |
