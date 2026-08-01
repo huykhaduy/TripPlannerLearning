@@ -15,7 +15,7 @@ export function Modal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4" onClick={onClose}>
       <div
-        className={`w-full ${maxWidth} rounded-2xl bg-white shadow-2xl`}
+        className={`max-h-[90vh] w-full overflow-y-auto ${maxWidth} rounded-2xl bg-white shadow-2xl`}
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-label={title}
