@@ -6,6 +6,7 @@ import { Card } from '../../components/Card';
 import { Field, fieldControlClass } from '../../components/Field';
 import { Button } from '../../components/Button';
 import { EmptyState } from '../../components/EmptyState';
+import { Modal } from '../../components/Modal';
 import type { TripSummary } from '../../types';
 import { TripThumbnail, formatDates } from './TripThumbnail';
 
@@ -86,49 +87,28 @@ export function TripsPage() {
       </div>
 
       {modalOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4"
-          onClick={closeModal}
-        >
-          <div
-            className="w-full max-w-lg rounded-2xl bg-white shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-            role="dialog"
-            aria-label="Plan a new trip"
-          >
-            <div className="flex items-center justify-between border-b border-[#E2E8F0] px-6 py-4">
-              <h2 className="font-headline text-lg font-semibold text-slate-900">Plan new trip</h2>
-              <button
-                type="button"
-                onClick={closeModal}
-                className="text-slate-400 hover:text-slate-600"
-                aria-label="Close"
-              >
-                ✕
-              </button>
+        <Modal title="Plan new trip" onClose={closeModal}>
+          <form onSubmit={handleCreate} className="flex flex-col gap-4">
+            <Field label="Trip name">
+              <input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="e.g. Summer in Da Nang"
+                required
+                className={fieldControlClass}
+              />
+            </Field>
+            {createError && <p className="text-sm text-red-600">{createError}</p>}
+            <div className="flex justify-end gap-2 pt-2">
+              <Button type="button" variant="secondary" onClick={closeModal}>
+                Cancel
+              </Button>
+              <Button type="submit" variant="action" disabled={creating || name.trim() === ''}>
+                {creating ? 'Creating…' : 'Create trip'}
+              </Button>
             </div>
-            <form onSubmit={handleCreate} className="flex flex-col gap-4 p-6">
-              <Field label="Trip name">
-                <input
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g. Summer in Da Nang"
-                  required
-                  className={fieldControlClass}
-                />
-              </Field>
-              {createError && <p className="text-sm text-red-600">{createError}</p>}
-              <div className="flex justify-end gap-2 pt-2">
-                <Button type="button" variant="secondary" onClick={closeModal}>
-                  Cancel
-                </Button>
-                <Button type="submit" variant="action" disabled={creating || name.trim() === ''}>
-                  {creating ? 'Creating…' : 'Create trip'}
-                </Button>
-              </div>
-            </form>
-          </div>
-        </div>
+          </form>
+        </Modal>
       )}
 
       {loadError ? (
