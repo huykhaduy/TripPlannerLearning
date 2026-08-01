@@ -7,11 +7,7 @@ import { Field, fieldControlClass } from '../../components/Field';
 import { Button } from '../../components/Button';
 import { EmptyState } from '../../components/EmptyState';
 import type { TripSummary } from '../../types';
-
-function formatDates(startDate: string | null, endDate: string | null) {
-  if (!startDate || !endDate) return 'No dates yet';
-  return `${startDate} → ${endDate}`;
-}
+import { TripThumbnail, formatDates } from './TripThumbnail';
 
 // F3/US10 — a relative status pill computed purely from the trip's own
 // dates vs. today; there's no backend field for this.
@@ -25,38 +21,11 @@ function getTripStatusLabel(startDate: string | null, endDate: string | null): s
   return days <= 1 ? 'Tomorrow' : `In ${days} days`;
 }
 
-// Deterministic (hashed from the trip id), not random — so a card's header
-// color is stable across reloads. Fallback for trips with no destination
-// photo yet (a brand-new trip, or one whose destinations have no image).
-const HEADER_GRADIENTS = [
-  'from-brand-600 to-brand-400',
-  'from-action-500 to-amber-300',
-  'from-tertiary-500 to-emerald-300',
-  'from-slate-700 to-slate-400',
-];
-function headerGradient(id: string): string {
-  const hash = [...id].reduce((sum, ch) => sum + ch.charCodeAt(0), 0);
-  return HEADER_GRADIENTS[hash % HEADER_GRADIENTS.length];
-}
-
-/** Trip card header: the trip's cover photo, or the gradient fallback above. */
+/** Trip card header: the trip's cover photo, or the gradient fallback, plus a status pill. */
 function TripCardHeader({ id, coverImageUrl, status }: { id: string; coverImageUrl: string | null; status: string | null }) {
-  const [failed, setFailed] = useState(false);
-  const showImage = coverImageUrl && !failed;
-
   return (
-    <div className={`relative flex h-24 items-end overflow-hidden p-3 ${showImage ? '' : `bg-gradient-to-br ${headerGradient(id)}`}`}>
-      {showImage && (
-        <>
-          <img
-            src={coverImageUrl}
-            alt=""
-            onError={() => setFailed(true)}
-            className="absolute inset-0 h-full w-full object-cover"
-          />
-          <div className="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent" />
-        </>
-      )}
+    <div className="relative flex h-24 items-end overflow-hidden p-3">
+      <TripThumbnail id={id} coverImageUrl={coverImageUrl} />
       {status && (
         <span className="absolute right-3 top-3 rounded-full bg-white/90 px-3 py-1 text-xs font-bold text-slate-900">
           {status}

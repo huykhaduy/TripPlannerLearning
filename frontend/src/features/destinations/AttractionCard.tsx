@@ -25,7 +25,7 @@ export function AttractionCard({ attraction }: { attraction: AttractionSummary }
         )}
         <div className="flex flex-col gap-1 p-4 pb-0">
           <strong className="font-headline text-slate-900">{attraction.name}</strong>
-          {attraction.category && <span className="text-sm text-slate-500">{attraction.category}</span>}
+          {attraction.category && <span className="text-sm capitalize text-slate-500">{attraction.category}</span>}
           {attraction.rating != null && (
             <span className="text-sm text-slate-700">⭐ {attraction.rating.toFixed(1)}</span>
           )}

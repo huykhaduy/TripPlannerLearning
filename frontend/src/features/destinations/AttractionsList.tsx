@@ -91,7 +91,7 @@ export function AttractionsList({ city }: { city: LocationSuggestion }) {
                 key={category}
                 type="button"
                 onClick={() => setCategoryFilter(category)}
-                className={`rounded-md px-2 py-1.5 text-left text-sm ${
+                className={`rounded-md px-2 py-1.5 text-left text-sm capitalize ${
                   categoryFilter === category
                     ? 'bg-brand-50 font-semibold text-brand-600'
                     : 'text-slate-700 hover:bg-slate-50'

@@ -6,6 +6,7 @@ import { getMyTrips, getTrip, addDestination } from '../../api/trips';
 import { Button } from '../../components/Button';
 import { Field, fieldControlClass } from '../../components/Field';
 import type { AttractionSummary, ItineraryDay, TripSummary } from '../../types';
+import { TripThumbnail, formatDates } from '../trips/TripThumbnail';
 
 /**
  * F3/US3 — add an attraction to one of the user's trips, optionally onto a
@@ -130,7 +131,7 @@ function AddToTripDialog({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4" onClick={onClose}>
       <div
-        className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-6 shadow-lg"
+        className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-lg"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-label={`Add ${attraction.name} to a trip`}
@@ -147,16 +148,40 @@ function AddToTripDialog({
 
         {trips !== null && trips.length > 0 && (
           <div className="mt-4 flex flex-col gap-3">
-            <Field label="Trip">
-              <select value={tripId} onChange={(e) => setTripId(e.target.value)} className={fieldControlClass}>
-                <option value="">Choose a trip…</option>
-                {trips.map((trip) => (
-                  <option key={trip.id} value={trip.id}>
-                    {trip.name}
-                  </option>
-                ))}
-              </select>
-            </Field>
+            <div role="radiogroup" aria-label="Trip" className="flex max-h-64 flex-col gap-2 overflow-y-auto pr-1">
+              {trips.map((trip) => {
+                const selected = tripId === trip.id;
+                return (
+                  <button
+                    key={trip.id}
+                    type="button"
+                    aria-pressed={selected}
+                    onClick={() => setTripId(trip.id)}
+                    className={
+                      selected
+                        ? 'shrink-0 overflow-hidden rounded-xl border-2 border-brand-600 text-left'
+                        : 'shrink-0 overflow-hidden rounded-xl border border-slate-200 text-left hover:border-slate-300'
+                    }
+                  >
+                    <div className="relative h-16 w-full">
+                      <TripThumbnail id={trip.id} coverImageUrl={trip.coverImageUrl} />
+                      {selected && (
+                        <span className="absolute right-2 top-2 rounded-full bg-white/90 px-2 text-sm font-bold text-brand-600">
+                          ✓
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex flex-col gap-0.5 p-3">
+                      <strong className="text-sm text-slate-900">{trip.name}</strong>
+                      <span className="text-xs text-slate-500">{formatDates(trip.startDate, trip.endDate)}</span>
+                      <span className="text-xs text-slate-500">
+                        {trip.destinationCount} destination{trip.destinationCount === 1 ? '' : 's'}
+                      </span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
 
             {tripId && (
               <Field label="Day">

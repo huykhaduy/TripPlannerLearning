@@ -172,7 +172,7 @@ export function DestinationDetailsPage() {
           <div className="pointer-events-auto flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
             <div>
               {details.category && (
-                <span className="inline-block rounded-full bg-brand-600 px-3 py-1 text-xs font-semibold">
+                <span className="inline-block rounded-full bg-brand-600 px-3 py-1 text-xs font-semibold capitalize">
                   {details.category}
                 </span>
               )}
