@@ -6,7 +6,9 @@ import { getTrip, removeDestination, updateItineraryItem, updateTrip } from '../
 import { Card } from '../../components/Card';
 import { Field, fieldControlClass } from '../../components/Field';
 import { Button } from '../../components/Button';
+import { Modal } from '../../components/Modal';
 import type { TripDestination, TripDetail } from '../../types';
+import { formatDates } from './TripThumbnail';
 
 /** Small thumbnail with the same missing/broken-image fallback as the attraction cards. */
 function DestinationThumbnail({ imageUrl, name }: { imageUrl: string | null; name: string }) {
@@ -164,6 +166,7 @@ export function TripDetailPage() {
   const [moveError, setMoveError] = useState<string | null>(null);
 
   const [savedPlacesQuery, setSavedPlacesQuery] = useState('');
+  const [editOpen, setEditOpen] = useState(false);
 
   // Sync both the page and the edit form from a freshly fetched/saved trip.
   function applyTrip(fresh: TripDetail) {
@@ -202,6 +205,16 @@ export function TripDetailPage() {
     });
   }
 
+  function closeEditModal() {
+    setEditOpen(false);
+    if (trip) {
+      setName(trip.name);
+      setStartDate(trip.startDate ?? '');
+      setEndDate(trip.endDate ?? '');
+    }
+    setSaveError(null);
+  }
+
   async function handleSave(event: FormEvent) {
     event.preventDefault();
     if (!tripId) return;
@@ -219,6 +232,7 @@ export function TripDetailPage() {
       // <input type="date"> uses '' for empty — the API wants null.
       const updated = await updateTrip(tripId, name.trim(), startDate || null, endDate || null);
       applyTrip(updated);
+      setEditOpen(false);
     } catch (err) {
       setSaveError(getErrorMessage(err, 'Could not save the trip.'));
     } finally {
@@ -298,10 +312,6 @@ export function TripDetailPage() {
 
   const hasDays = trip.days.length > 0;
 
-  const isDirty =
-    name !== trip.name || startDate !== (trip.startDate ?? '') || endDate !== (trip.endDate ?? '');
-  const saveStatusLabel = saving ? 'Saving…' : saveError ? 'Error saving' : isDirty ? 'Unsaved changes' : 'All changes saved';
-
   const savedPlacesSection = (
     <section className="flex h-full flex-col rounded-lg border border-[#E2E8F0] bg-white p-4">
       <h2 className="font-headline text-base font-semibold text-brand-600">Saved Places</h2>
@@ -342,50 +352,59 @@ export function TripDetailPage() {
             ← Back to my trips
           </Link>
           <h1 className="font-headline mt-2 text-3xl font-bold tracking-tight text-slate-900">{trip.name}</h1>
+          <p className="text-sm text-slate-500">{formatDates(trip.startDate, trip.endDate)}</p>
         </div>
-        <span
-          className={`flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold ${
-            saveError ? 'bg-red-50 text-red-600' : 'bg-brand-50 text-brand-600'
-          }`}
-        >
-          <span aria-hidden="true">{saving ? '⏳' : '☁️'}</span>
-          {saveStatusLabel}
-        </span>
+        <div className="flex items-center gap-3">
+          <span className="flex items-center gap-2 rounded-full bg-brand-50 px-3 py-1.5 text-xs font-semibold text-brand-600">
+            <span aria-hidden="true">{saving ? '⏳' : '☁️'}</span>
+            {saving ? 'Saving…' : 'All changes saved'}
+          </span>
+          <Button type="button" variant="secondary" size="sm" onClick={() => setEditOpen(true)}>
+            Edit details
+          </Button>
+        </div>
       </div>
 
-      <Card>
-        <form onSubmit={handleSave} className="flex flex-col gap-4">
-          <Field label="Name">
-            <input value={name} onChange={(e) => setName(e.target.value)} required className={fieldControlClass} />
-          </Field>
-          <div className="flex gap-4">
-            <div className="flex-1">
-              <Field label="Start date">
-                <input
-                  type="date"
-                  value={startDate}
-                  onChange={(e) => setStartDate(e.target.value)}
-                  className={fieldControlClass}
-                />
-              </Field>
+      {editOpen && (
+        <Modal title="Edit trip details" onClose={closeEditModal}>
+          <form onSubmit={handleSave} className="flex flex-col gap-4">
+            <Field label="Name">
+              <input value={name} onChange={(e) => setName(e.target.value)} required className={fieldControlClass} />
+            </Field>
+            <div className="flex gap-4">
+              <div className="flex-1">
+                <Field label="Start date">
+                  <input
+                    type="date"
+                    value={startDate}
+                    onChange={(e) => setStartDate(e.target.value)}
+                    className={fieldControlClass}
+                  />
+                </Field>
+              </div>
+              <div className="flex-1">
+                <Field label="End date">
+                  <input
+                    type="date"
+                    value={endDate}
+                    onChange={(e) => setEndDate(e.target.value)}
+                    className={fieldControlClass}
+                  />
+                </Field>
+              </div>
             </div>
-            <div className="flex-1">
-              <Field label="End date">
-                <input
-                  type="date"
-                  value={endDate}
-                  onChange={(e) => setEndDate(e.target.value)}
-                  className={fieldControlClass}
-                />
-              </Field>
+            {saveError && <p className="text-sm text-red-600">{saveError}</p>}
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="secondary" onClick={closeEditModal}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={saving || name.trim() === ''}>
+                {saving ? 'Saving…' : 'Save changes'}
+              </Button>
             </div>
-          </div>
-          {saveError && <p className="text-sm text-red-600">{saveError}</p>}
-          <Button type="submit" disabled={saving || name.trim() === ''} className="self-start">
-            {saving ? 'Saving…' : 'Save changes'}
-          </Button>
-        </form>
-      </Card>
+          </form>
+        </Modal>
+      )}
 
       {removeError && <p className="text-sm text-red-600">{removeError}</p>}
       {moveError && <p className="text-sm text-red-600">{moveError}</p>}
