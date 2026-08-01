@@ -5,6 +5,7 @@ import { useAuth } from '../../auth/AuthContext';
 import { getMyTrips, getTrip, addDestination } from '../../api/trips';
 import { Button } from '../../components/Button';
 import { Field, fieldControlClass } from '../../components/Field';
+import { Modal } from '../../components/Modal';
 import type { AttractionSummary, ItineraryDay, TripSummary } from '../../types';
 import { TripThumbnail, formatDates } from '../trips/TripThumbnail';
 
@@ -129,86 +130,75 @@ function AddToTripDialog({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4" onClick={onClose}>
-      <div
-        className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-lg"
-        onClick={(e) => e.stopPropagation()}
-        role="dialog"
-        aria-label={`Add ${attraction.name} to a trip`}
-      >
-        <h3 className="text-lg font-semibold text-slate-900">Add “{attraction.name}”</h3>
+    <Modal title={`Add "${attraction.name}"`} onClose={onClose} maxWidth="max-w-md">
+      {trips === null && !error && <p className="text-sm text-slate-500">Loading your trips…</p>}
 
-        {trips === null && !error && <p className="mt-3 text-sm text-slate-500">Loading your trips…</p>}
+      {trips !== null && trips.length === 0 && (
+        <p className="text-sm text-slate-500">You have no trips yet — create one on the My trips page first.</p>
+      )}
 
-        {trips !== null && trips.length === 0 && (
-          <p className="mt-3 text-sm text-slate-500">
-            You have no trips yet — create one on the My trips page first.
-          </p>
-        )}
-
-        {trips !== null && trips.length > 0 && (
-          <div className="mt-4 flex flex-col gap-3">
-            <div role="radiogroup" aria-label="Trip" className="flex max-h-64 flex-col gap-2 overflow-y-auto pr-1">
-              {trips.map((trip) => {
-                const selected = tripId === trip.id;
-                return (
-                  <button
-                    key={trip.id}
-                    type="button"
-                    aria-pressed={selected}
-                    onClick={() => setTripId(trip.id)}
-                    className={
-                      selected
-                        ? 'shrink-0 overflow-hidden rounded-xl border-2 border-brand-600 text-left'
-                        : 'shrink-0 overflow-hidden rounded-xl border border-slate-200 text-left hover:border-slate-300'
-                    }
-                  >
-                    <div className="relative h-16 w-full">
-                      <TripThumbnail id={trip.id} coverImageUrl={trip.coverImageUrl} />
-                      {selected && (
-                        <span className="absolute right-2 top-2 rounded-full bg-white/90 px-2 text-sm font-bold text-brand-600">
-                          ✓
-                        </span>
-                      )}
-                    </div>
-                    <div className="flex flex-col gap-0.5 p-3">
-                      <strong className="text-sm text-slate-900">{trip.name}</strong>
-                      <span className="text-xs text-slate-500">{formatDates(trip.startDate, trip.endDate)}</span>
-                      <span className="text-xs text-slate-500">
-                        {trip.destinationCount} destination{trip.destinationCount === 1 ? '' : 's'}
+      {trips !== null && trips.length > 0 && (
+        <div className="flex flex-col gap-3">
+          <div role="radiogroup" aria-label="Trip" className="flex max-h-64 flex-col gap-2 overflow-y-auto pr-1">
+            {trips.map((trip) => {
+              const selected = tripId === trip.id;
+              return (
+                <button
+                  key={trip.id}
+                  type="button"
+                  aria-pressed={selected}
+                  onClick={() => setTripId(trip.id)}
+                  className={
+                    selected
+                      ? 'shrink-0 overflow-hidden rounded-xl border-2 border-brand-600 text-left'
+                      : 'shrink-0 overflow-hidden rounded-xl border border-slate-200 text-left hover:border-slate-300'
+                  }
+                >
+                  <div className="relative h-16 w-full">
+                    <TripThumbnail id={trip.id} coverImageUrl={trip.coverImageUrl} />
+                    {selected && (
+                      <span className="absolute right-2 top-2 rounded-full bg-white/90 px-2 text-sm font-bold text-brand-600">
+                        ✓
                       </span>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-
-            {tripId && (
-              <Field label="Day">
-                <select value={dayId} onChange={(e) => setDayId(e.target.value)} className={fieldControlClass}>
-                  <option value="">Saved Places (no day yet)</option>
-                  {(days ?? []).map((day) => (
-                    <option key={day.id} value={day.id}>
-                      Day {day.dayNumber} — {day.date}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-            )}
+                    )}
+                  </div>
+                  <div className="flex flex-col gap-0.5 p-3">
+                    <strong className="text-sm text-slate-900">{trip.name}</strong>
+                    <span className="text-xs text-slate-500">{formatDates(trip.startDate, trip.endDate)}</span>
+                    <span className="text-xs text-slate-500">
+                      {trip.destinationCount} destination{trip.destinationCount === 1 ? '' : 's'}
+                    </span>
+                  </div>
+                </button>
+              );
+            })}
           </div>
-        )}
 
-        {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
-
-        <div className="mt-5 flex justify-end gap-2">
-          <Button type="button" variant="secondary" size="sm" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button type="button" size="sm" onClick={handleAdd} disabled={!tripId || adding}>
-            {adding ? 'Adding…' : 'Add'}
-          </Button>
+          {tripId && (
+            <Field label="Day">
+              <select value={dayId} onChange={(e) => setDayId(e.target.value)} className={fieldControlClass}>
+                <option value="">Saved Places (no day yet)</option>
+                {(days ?? []).map((day) => (
+                  <option key={day.id} value={day.id}>
+                    Day {day.dayNumber} — {day.date}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          )}
         </div>
+      )}
+
+      {error && <p className="text-sm text-red-600">{error}</p>}
+
+      <div className="mt-5 flex justify-end gap-2">
+        <Button type="button" variant="secondary" size="sm" onClick={onClose}>
+          Cancel
+        </Button>
+        <Button type="button" size="sm" onClick={handleAdd} disabled={!tripId || adding}>
+          {adding ? 'Adding…' : 'Add'}
+        </Button>
       </div>
-    </div>
+    </Modal>
   );
 }
