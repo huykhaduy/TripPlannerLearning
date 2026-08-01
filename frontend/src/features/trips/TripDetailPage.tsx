@@ -411,11 +411,14 @@ export function TripDetailPage() {
 
       {hasDays ? (
         <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
-          <div className="lg:sticky lg:top-8 lg:w-72 lg:shrink-0">{savedPlacesSection}</div>
+          <div className="lg:sticky lg:top-8 lg:w-80 lg:shrink-0">{savedPlacesSection}</div>
 
           <div className="flex flex-1 gap-6 overflow-x-auto pb-4">
             {trip.days.map((day) => (
-              <section key={day.id} className="flex w-72 shrink-0 flex-col gap-3 rounded-lg bg-[#F8FAFC] p-3">
+              <section
+                key={day.id}
+                className="flex w-80 shrink-0 flex-col gap-3 rounded-lg border border-[#E2E8F0] bg-white p-4"
+              >
                 <h2 className="font-headline text-base font-semibold text-slate-900">
                   Day {day.dayNumber} <span className="font-normal text-slate-500">{day.date}</span>
                 </h2>
