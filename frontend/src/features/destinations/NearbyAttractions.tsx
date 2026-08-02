@@ -40,9 +40,13 @@ export function NearbyAttractions({
   if (!attractions || attractions.length === 0) return null;
 
   return (
-    <section>
+    <section className="mt-6">
       <h2 className="font-headline mb-4 text-lg font-semibold text-slate-900">Nearby experiences</h2>
-      <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
+      {/* lg:grid-cols-3 (not xl:, unlike the search page's identical-looking
+          grid) — this page's container tops out at max-w-5xl (1024px), so
+          xl's 1280px breakpoint would leave a wide band showing only 2
+          oversized columns before the 3rd kicks in. */}
+      <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
         {attractions.slice(0, 6).map((attraction) => (
           <AttractionCard key={attraction.providerId} attraction={attraction} />
         ))}
