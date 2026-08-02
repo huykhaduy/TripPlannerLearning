@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from 'react';
 import { getAttractions } from '../../api/destinations';
 import { AttractionCard } from './AttractionCard';
 import { EmptyState } from '../../components/EmptyState';
-import { fieldControlClass } from '../../components/Field';
 import { Button } from '../../components/Button';
 import type { AttractionSummary, LocationSuggestion } from '../../types';
 
@@ -12,20 +11,16 @@ export function AttractionsList({ city }: { city: LocationSuggestion }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // F1/US4-US5 — filters and sort are frontend concerns over the ≤20 loaded
+  // F1/US4 — category filtering is a frontend concern over the ≤20 loaded
   // results (spec §11.2); no API parameters involved.
   const [categoryFilter, setCategoryFilter] = useState('');
-  const [minRating, setMinRating] = useState(''); // '' = any; otherwise a number as string
-  const [sortBy, setSortBy] = useState<'recommended' | 'rating'>('recommended');
 
   useEffect(() => {
     let ignore = false;
     setLoading(true);
     setError(null);
-    // A new city means new results — stale filters would silently hide them.
+    // A new city means new results — a stale filter would silently hide them.
     setCategoryFilter('');
-    setMinRating('');
-    setSortBy('recommended');
     getAttractions(city.latitude, city.longitude)
       .then((results) => {
         if (!ignore) setAttractions(results);
@@ -48,20 +43,12 @@ export function AttractionsList({ city }: { city: LocationSuggestion }) {
     [attractions],
   );
 
-  const visible = useMemo(() => {
-    const filtered = attractions.filter(
-      (a) =>
-        (categoryFilter === '' || a.category === categoryFilter) &&
-        (minRating === '' || (a.rating != null && a.rating >= Number(minRating))),
-    );
-    // "Recommended" keeps the API's order; rating sort puts unrated last (US5
-    // keeps the filters because it sorts the already-filtered list).
-    return sortBy === 'rating'
-      ? [...filtered].sort((a, b) => (b.rating ?? -1) - (a.rating ?? -1))
-      : filtered;
-  }, [attractions, categoryFilter, minRating, sortBy]);
+  const visible = useMemo(
+    () => attractions.filter((a) => categoryFilter === '' || a.category === categoryFilter),
+    [attractions, categoryFilter],
+  );
 
-  const hasActiveFilters = categoryFilter !== '' || minRating !== '';
+  const hasActiveFilters = categoryFilter !== '';
 
   if (loading) return <p className="text-center text-sm text-slate-500">Loading attractions…</p>;
   if (error) return <p className="text-center text-sm text-red-600">{error}</p>;
@@ -103,45 +90,12 @@ export function AttractionsList({ city }: { city: LocationSuggestion }) {
           </div>
         </div>
 
-        <div className="mt-6">
-          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-[#434654]">Minimum rating</p>
-          <div className="flex flex-col gap-1">
-            {(['', '3', '4'] as const).map((value) => (
-              <button
-                key={value || 'any'}
-                type="button"
-                onClick={() => setMinRating(value)}
-                className={`rounded-md px-2 py-1.5 text-left text-sm ${
-                  minRating === value ? 'bg-brand-50 font-semibold text-brand-600' : 'text-slate-700 hover:bg-slate-50'
-                }`}
-              >
-                {value === '' ? 'Any rating' : `⭐ ${value}+ stars`}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <label className="mt-6 flex flex-col gap-1.5 text-sm text-slate-500">
-          Sort by
-          <select
-            value={sortBy}
-            onChange={(e) => setSortBy(e.target.value as 'recommended' | 'rating')}
-            className={fieldControlClass}
-          >
-            <option value="recommended">Recommended</option>
-            <option value="rating">Highest rating</option>
-          </select>
-        </label>
-
         {hasActiveFilters && (
           <Button
             type="button"
             variant="secondary"
             size="sm"
-            onClick={() => {
-              setCategoryFilter('');
-              setMinRating('');
-            }}
+            onClick={() => setCategoryFilter('')}
             className="mt-4 w-full"
           >
             Clear filters
