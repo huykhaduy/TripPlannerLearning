@@ -9,10 +9,10 @@ export function AttractionCard({ attraction }: { attraction: AttractionSummary }
   const showImage = attraction.imageUrl && !imageFailed;
 
   return (
-    <div className="overflow-hidden rounded-lg border border-[#E2E8F0] bg-white transition-shadow hover:shadow-md">
+    <div className="flex h-full flex-col overflow-hidden rounded-lg border border-[#E2E8F0] bg-white transition-shadow hover:shadow-md">
       {/* F2/US1 — open the details view. Add-to-trip stays outside this link
           so a button never ends up nested inside an anchor. */}
-      <Link to={`/destinations/${encodeURIComponent(attraction.providerId)}`}>
+      <Link to={`/destinations/${encodeURIComponent(attraction.providerId)}`} className="flex flex-1 flex-col">
         {showImage ? (
           <img
             src={attraction.imageUrl!}
@@ -23,7 +23,7 @@ export function AttractionCard({ attraction }: { attraction: AttractionSummary }
         ) : (
           <div className="flex aspect-[4/3] w-full items-center justify-center bg-slate-100 text-4xl">🏛️</div>
         )}
-        <div className="flex flex-col gap-1 p-4 pb-0">
+        <div className="flex flex-1 flex-col gap-1 p-4 pb-0">
           <strong className="font-headline text-slate-900">{attraction.name}</strong>
           {attraction.category && <span className="text-sm capitalize text-slate-500">{attraction.category}</span>}
           {attraction.rating != null && (
