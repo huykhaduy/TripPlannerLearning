@@ -41,13 +41,21 @@ export function SearchPage() {
 
   return (
     <div className="flex flex-col gap-8">
-      <div className="rounded-3xl bg-brand-600 px-6 py-14 text-center sm:py-20">
-        <h1 className="font-headline text-4xl font-bold tracking-tight text-white sm:text-5xl">Where to next?</h1>
-        <p className="mt-3 text-brand-100">Search a city to see its recommended attractions.</p>
-        <div className="mx-auto mt-6 max-w-xl">
-          <CitySearchInput onSelect={handleSelect} initialCity={selectedCity} />
+      {selectedCity ? (
+        <div className="rounded-2xl bg-brand-600 px-4 py-3">
+          <div className="mx-auto max-w-xl">
+            <CitySearchInput onSelect={handleSelect} initialCity={selectedCity} />
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="rounded-3xl bg-brand-600 px-6 py-14 text-center sm:py-20">
+          <h1 className="font-headline text-4xl font-bold tracking-tight text-white sm:text-5xl">Where to next?</h1>
+          <p className="mt-3 text-brand-100">Search a city to see its recommended attractions.</p>
+          <div className="mx-auto mt-6 max-w-xl">
+            <CitySearchInput onSelect={handleSelect} initialCity={selectedCity} />
+          </div>
+        </div>
+      )}
 
       {selectedCity && <AttractionsList city={selectedCity} />}
 
