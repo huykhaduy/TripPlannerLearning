@@ -5,7 +5,7 @@ import { EmptyState } from '../../components/EmptyState';
 import { Button } from '../../components/Button';
 import type { AttractionSummary, LocationSuggestion } from '../../types';
 
-/** F1/US3-US5 — recommended attractions near the selected city, with filters and sort. */
+/** F1/US3-US4 — recommended attractions near the selected city, with category filtering. */
 export function AttractionsList({ city }: { city: LocationSuggestion }) {
   const [attractions, setAttractions] = useState<AttractionSummary[]>([]);
   const [loading, setLoading] = useState(true);
