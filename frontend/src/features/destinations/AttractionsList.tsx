@@ -6,8 +6,31 @@ import { EmptyState } from '../../components/EmptyState';
 import { Button } from '../../components/Button';
 import type { AttractionSummary, LocationSuggestion } from '../../types';
 
+/** A single card-shaped placeholder shown while attractions are loading. */
+function AttractionCardSkeleton() {
+  return (
+    <div className="flex h-full flex-col overflow-hidden rounded-lg border border-[#E2E8F0] bg-white">
+      <div className="aspect-[4/3] w-full animate-pulse bg-slate-200" />
+      <div className="flex flex-1 flex-col gap-2 p-4 pb-0">
+        <div className="h-4 w-3/4 animate-pulse rounded bg-slate-200" />
+        <div className="h-5 w-16 animate-pulse rounded-full bg-slate-200" />
+      </div>
+      <div className="p-4 pt-3">
+        <div className="h-9 w-full animate-pulse rounded-md bg-slate-200" />
+      </div>
+    </div>
+  );
+}
+
 /** F1/US3-US4 — recommended attractions near the selected city, with category filtering. */
-export function AttractionsList({ city }: { city: LocationSuggestion }) {
+export function AttractionsList({
+  city,
+  onLoadingChange,
+}: {
+  city: LocationSuggestion;
+  /** Reports the fetch's in-flight status to the parent (e.g. to hide other page content while loading). */
+  onLoadingChange?: (loading: boolean) => void;
+}) {
   const [attractions, setAttractions] = useState<AttractionSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -19,6 +42,7 @@ export function AttractionsList({ city }: { city: LocationSuggestion }) {
   useEffect(() => {
     let ignore = false;
     setLoading(true);
+    onLoadingChange?.(true);
     setError(null);
     // A new city means new results — a stale filter would silently hide them.
     setCategoryFilter('');
@@ -30,12 +54,16 @@ export function AttractionsList({ city }: { city: LocationSuggestion }) {
         if (!ignore) setError('Could not load attractions. Please try again.');
       })
       .finally(() => {
-        if (!ignore) setLoading(false);
+        if (!ignore) {
+          setLoading(false);
+          onLoadingChange?.(false);
+        }
       });
 
     return () => {
       ignore = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- onLoadingChange is a setState passed by the parent; including it would re-run this fetch if the parent re-renders with a new inline function.
   }, [city]);
 
   // Filter options come from the data itself — only categories that exist.
@@ -51,7 +79,29 @@ export function AttractionsList({ city }: { city: LocationSuggestion }) {
 
   const hasActiveFilters = categoryFilter !== '';
 
-  if (loading) return <p className="text-center text-sm text-slate-500">Loading attractions…</p>;
+  if (loading) {
+    return (
+      <section className="flex flex-col gap-6 md:flex-row md:items-start" aria-busy="true" aria-label="Loading attractions">
+        <aside className="w-full flex-shrink-0 rounded-lg border border-[#E2E8F0] bg-white p-4 md:w-64">
+          <h2 className="font-headline text-base font-semibold text-brand-600">Filters</h2>
+          <div className="mt-4 flex flex-col gap-2">
+            <div className="h-7 w-full animate-pulse rounded-md bg-slate-100" />
+            <div className="h-7 w-3/4 animate-pulse rounded-md bg-slate-100" />
+            <div className="h-7 w-2/3 animate-pulse rounded-md bg-slate-100" />
+          </div>
+        </aside>
+
+        <div className="flex-1">
+          <div className="mb-4 h-6 w-56 animate-pulse rounded bg-slate-200" />
+          <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
+            {Array.from({ length: 6 }, (_, i) => (
+              <AttractionCardSkeleton key={i} />
+            ))}
+          </div>
+        </div>
+      </section>
+    );
+  }
   if (error) return <p className="text-center text-sm text-red-600">{error}</p>;
   if (attractions.length === 0) {
     return <EmptyState message={`No attractions found near ${city.name}.`} />;

@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../auth/AuthContext';
 import { CitySearchInput } from './CitySearchInput';
@@ -11,6 +11,10 @@ export function SearchPage() {
   // The selected city lives in the URL (not useState) so it survives a page
   // refresh and the "back" navigation from the destination details page.
   const [searchParams, setSearchParams] = useSearchParams();
+  // Reported by AttractionsList — hides the "Ready to plan?"/"Log in…" prompt
+  // below while attractions are still loading, instead of showing it above
+  // a loading skeleton every time a city is searched.
+  const [attractionsLoading, setAttractionsLoading] = useState(false);
 
   const selectedCity = useMemo<LocationSuggestion | null>(() => {
     const name = searchParams.get('city');
@@ -54,26 +58,28 @@ export function SearchPage() {
         </div>
       )}
 
-      {selectedCity && <AttractionsList city={selectedCity} />}
+      {selectedCity && <AttractionsList city={selectedCity} onLoadingChange={setAttractionsLoading} />}
 
-      <p className="text-center text-sm text-slate-500">
-        {isAuthenticated ? (
-          <>
-            Ready to plan?{' '}
-            <Link to="/trips" className="text-brand-600 hover:underline">
-              Go to My trips
-            </Link>
-            .
-          </>
-        ) : (
-          <>
-            <Link to="/login" className="text-brand-600 hover:underline">
-              Log in
-            </Link>{' '}
-            to start planning a trip.
-          </>
-        )}
-      </p>
+      {!attractionsLoading && (
+        <p className="text-center text-sm text-slate-500">
+          {isAuthenticated ? (
+            <>
+              Ready to plan?{' '}
+              <Link to="/trips" className="text-brand-600 hover:underline">
+                Go to My trips
+              </Link>
+              .
+            </>
+          ) : (
+            <>
+              <Link to="/login" className="text-brand-600 hover:underline">
+                Log in
+              </Link>{' '}
+              to start planning a trip.
+            </>
+          )}
+        </p>
+      )}
     </div>
   );
 }
