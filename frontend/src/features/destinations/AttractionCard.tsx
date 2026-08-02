@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AddToTripButton } from './AddToTripButton';
+import { categoryColor } from './categoryColor';
 import type { AttractionSummary } from '../../types';
 
 /** F1/US3 & F2 — a single attraction/POI card: photo, name, category, rating, add-to-trip. */
@@ -25,7 +26,13 @@ export function AttractionCard({ attraction }: { attraction: AttractionSummary }
         )}
         <div className="flex flex-1 flex-col gap-1 p-4 pb-0">
           <strong className="font-headline text-slate-900">{attraction.name}</strong>
-          {attraction.category && <span className="text-sm capitalize text-slate-500">{attraction.category}</span>}
+          {attraction.category && (
+            <span
+              className={`inline-flex w-fit rounded-full px-2 py-0.5 text-xs font-semibold capitalize ${categoryColor(attraction.category).bg} ${categoryColor(attraction.category).text}`}
+            >
+              {attraction.category}
+            </span>
+          )}
           {attraction.rating != null && (
             <span className="text-sm text-slate-700">⭐ {attraction.rating.toFixed(1)}</span>
           )}

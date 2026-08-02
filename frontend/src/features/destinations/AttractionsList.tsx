@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { getAttractions } from '../../api/destinations';
 import { AttractionCard } from './AttractionCard';
+import { categoryColor } from './categoryColor';
 import { EmptyState } from '../../components/EmptyState';
 import { Button } from '../../components/Button';
 import type { AttractionSummary, LocationSuggestion } from '../../types';
@@ -73,20 +74,22 @@ export function AttractionsList({ city }: { city: LocationSuggestion }) {
             >
               All destinations
             </button>
-            {categories.map((category) => (
-              <button
-                key={category}
-                type="button"
-                onClick={() => setCategoryFilter(category)}
-                className={`rounded-md px-2 py-1.5 text-left text-sm capitalize ${
-                  categoryFilter === category
-                    ? 'bg-brand-50 font-semibold text-brand-600'
-                    : 'text-slate-700 hover:bg-slate-50'
-                }`}
-              >
-                {category}
-              </button>
-            ))}
+            {categories.map((category) => {
+              const colors = categoryColor(category);
+              const selected = categoryFilter === category;
+              return (
+                <button
+                  key={category}
+                  type="button"
+                  onClick={() => setCategoryFilter(category)}
+                  className={`rounded-md px-2 py-1.5 text-left text-sm capitalize ${
+                    selected ? `${colors.bg} font-semibold ${colors.text}` : 'text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  {category}
+                </button>
+              );
+            })}
           </div>
         </div>
 
