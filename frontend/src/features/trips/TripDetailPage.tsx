@@ -354,15 +354,9 @@ export function TripDetailPage() {
           <h1 className="font-headline mt-2 text-3xl font-bold tracking-tight text-slate-900">{trip.name}</h1>
           <p className="text-sm text-slate-500">{formatDates(trip.startDate, trip.endDate)}</p>
         </div>
-        <div className="flex items-center gap-3">
-          <span className="flex items-center gap-2 rounded-full bg-brand-50 px-3 py-1.5 text-xs font-semibold text-brand-600">
-            <span aria-hidden="true">{saving ? '⏳' : '☁️'}</span>
-            {saving ? 'Saving…' : 'All changes saved'}
-          </span>
-          <Button type="button" variant="secondary" size="sm" onClick={() => setEditOpen(true)}>
-            Edit details
-          </Button>
-        </div>
+        <Button type="button" variant="secondary" size="sm" onClick={() => setEditOpen(true)}>
+          Edit details
+        </Button>
       </div>
 
       {editOpen && (
