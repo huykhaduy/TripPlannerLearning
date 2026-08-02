@@ -195,64 +195,64 @@ export function DestinationDetailsPage() {
 
       {details.description && <p className="mt-6 text-slate-700">{details.description}</p>}
 
-      <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
-        {/* lg:only:col-span-2 — if NearbyAttractions doesn't render (no other
-            POIs nearby, or no coordinates at all), this card is the grid's
-            only child and should fill the row instead of sitting alone at
-            half-width with dead space beside it. */}
-        <Card padding="tight" className="h-fit lg:only:col-span-2">
+      <div className="mt-6">
+        <Card padding="tight">
           <h2 className="font-headline text-base font-semibold text-brand-600">Practical info</h2>
-          <dl className="mt-3 flex flex-col gap-3 text-sm">
-            <div>
-              <dt className="font-medium text-slate-500">Address</dt>
-              <dd className="mt-0.5 text-slate-900">{details.address ?? 'Not available'}</dd>
-            </div>
-            <div>
-              <dt className="font-medium text-slate-500">Opening hours</dt>
-              <dd className="mt-0.5 text-slate-900">{details.openingHours ?? 'Opening hours not available'}</dd>
-            </div>
-            {details.website && (
+          <div className="mt-3 grid grid-cols-1 gap-6 lg:grid-cols-2">
+            <dl className={`flex flex-col gap-3 text-sm ${hasNearby ? '' : 'lg:col-span-2'}`}>
               <div>
-                <dt className="font-medium text-slate-500">Website</dt>
-                <dd className="mt-0.5">
-                  <a href={details.website} target="_blank" rel="noreferrer" className="text-brand-600 hover:underline">
-                    {details.website}
-                  </a>
-                </dd>
+                <dt className="font-medium text-slate-500">Address</dt>
+                <dd className="mt-0.5 text-slate-900">{details.address ?? 'Not available'}</dd>
+              </div>
+              <div>
+                <dt className="font-medium text-slate-500">Opening hours</dt>
+                <dd className="mt-0.5 text-slate-900">{details.openingHours ?? 'Opening hours not available'}</dd>
+              </div>
+              {details.website && (
+                <div>
+                  <dt className="font-medium text-slate-500">Website</dt>
+                  <dd className="mt-0.5">
+                    <a href={details.website} target="_blank" rel="noreferrer" className="text-brand-600 hover:underline">
+                      {details.website}
+                    </a>
+                  </dd>
+                </div>
+              )}
+            </dl>
+
+            {hasNearby && (
+              <div>
+                <div className="overflow-hidden rounded-lg border border-[#E2E8F0]">
+                  <iframe
+                    title={`Map showing ${details.name}`}
+                    src={buildOsmEmbedUrl(details.latitude!, details.longitude!)}
+                    loading="lazy"
+                    className="h-48 w-full border-0"
+                  />
+                </div>
+                <a
+                  href={buildOsmViewUrl(details.latitude!, details.longitude!)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-1.5 inline-block text-xs text-brand-600 hover:underline"
+                >
+                  View larger map
+                </a>
               </div>
             )}
-          </dl>
-
-          {hasNearby && (
-            <div className="mt-4">
-              <div className="overflow-hidden rounded-lg border border-[#E2E8F0]">
-                <iframe
-                  title={`Map showing ${details.name}`}
-                  src={buildOsmEmbedUrl(details.latitude!, details.longitude!)}
-                  loading="lazy"
-                  className="h-48 w-full border-0"
-                />
-              </div>
-              <a
-                href={buildOsmViewUrl(details.latitude!, details.longitude!)}
-                target="_blank"
-                rel="noreferrer"
-                className="mt-1.5 inline-block text-xs text-brand-600 hover:underline"
-              >
-                View larger map
-              </a>
-            </div>
-          )}
+          </div>
         </Card>
+      </div>
 
-        {hasNearby && (
+      {hasNearby && (
+        <div className="mt-6">
           <NearbyAttractions
             latitude={details.latitude!}
             longitude={details.longitude!}
             excludeProviderId={details.providerId}
           />
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
