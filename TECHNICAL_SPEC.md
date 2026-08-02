@@ -1472,8 +1472,13 @@ explicit.
 | **5. F1 frontend** 🔴 | Search + attractions UI with empty/loading/error states; `api/destinations.ts` | §11.5 | [SearchPage.tsx](frontend/src/features/destinations/SearchPage.tsx) | 4 |
 | **6. F2 details** 🟡 | `GetDetailsAsync` with DB fallback; details view; "Add to Trip" wiring + resume-after-login (US8) | §11.3, §11.5 | DestinationService.cs, new details component | 3, 5 |
 | **7. F3 advanced** 🔴/🟡 | New item endpoint (`PUT …/destinations/{itemId}`); schedule/reorder/move + duplicate rules + tests; optimistic DnD UI | §11.1 US4–US6 | ITripService.cs, TripService.cs, TripsController.cs, TripsPage.tsx | 3 |
-| **8. Polish** 🟡/⚪ | F1 filters/sort UI (US4/US5); stale-cache fallback; NFR spot-checks; broaden tests | §11.2 | frontend + cache | 5, 7 |
+| **8. Polish** 🟡/⚪ | F1 category filter UI (US4); stale-cache fallback; NFR spot-checks; broaden tests | §11.2 | frontend + cache | 5, 7 |
 | **9. Email verification** 🟡 optional | §11.4 flow (+ migration if token column chosen) | §11.4 | AuthService.cs, AuthController.cs, migration | any time |
+
+Phase 8's rating filter/sort (the other half of US4, and all of US5) was built and
+then removed — Geoapify supplies no ratings at all (`GeoapifyClient.cs:27,115`),
+so both were permanently dead UI. See
+`docs/superpowers/specs/2026-08-02-search-results-and-modal-polish-design.md`.
 
 Rules of engagement for each phase: write the service tests alongside the service
 (the test patterns are in §11.1/§9); run `dotnet test` (backend) and `npm run build`

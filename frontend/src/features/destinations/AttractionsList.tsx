@@ -59,7 +59,7 @@ export function AttractionsList({ city }: { city: LocationSuggestion }) {
   return (
     <section className="flex flex-col gap-6 md:flex-row md:items-start">
       <aside className="w-full flex-shrink-0 rounded-lg border border-[#E2E8F0] bg-white p-4 md:w-64">
-        <h3 className="font-headline text-base font-semibold text-brand-600">Filters</h3>
+        <h2 className="font-headline text-base font-semibold text-brand-600">Filters</h2>
 
         <div className="mt-4">
           <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-[#434654]">Category</p>

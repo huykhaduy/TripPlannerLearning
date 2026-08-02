@@ -5,11 +5,7 @@ import { CitySearchInput } from './CitySearchInput';
 import { AttractionsList } from './AttractionsList';
 import type { LocationSuggestion } from '../../types';
 
-/**
- * F1/US1-3 — public destination discovery page: city autocomplete +
- * recommended attractions. Filters/sorting (US4-5) and the details view
- * (Feature 2) come in later slices.
- */
+/** F1/US1-4 — public destination discovery page: city autocomplete, recommended attractions, and category filtering. */
 export function SearchPage() {
   const { isAuthenticated } = useAuth();
   // The selected city lives in the URL (not useState) so it survives a page
@@ -42,9 +38,10 @@ export function SearchPage() {
   return (
     <div className="flex flex-col gap-8">
       {selectedCity ? (
-        <div className="rounded-2xl bg-brand-600 px-4 py-3">
+        <div className="rounded-full bg-brand-600 px-3 py-2">
+          <h1 className="sr-only">Explore destinations</h1>
           <div className="mx-auto max-w-xl">
-            <CitySearchInput onSelect={handleSelect} initialCity={selectedCity} />
+            <CitySearchInput onSelect={handleSelect} initialCity={selectedCity} size="sm" />
           </div>
         </div>
       ) : (

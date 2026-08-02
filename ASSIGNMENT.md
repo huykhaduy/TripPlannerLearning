@@ -41,6 +41,13 @@ Endpoints (already routed): `GET /api/destinations/locations`, `GET /api/destina
 
 > Get coordinates from the geocoding call (US1/US2), then fetch POIs near them (US3).
 > NFRs: location search ≤ 500 ms, attractions ≤ 1000 ms (p95) — consider caching.
+>
+> US4/US5's rating filter and "highest rating" sort were built, then deliberately
+> removed — Geoapify (the configured provider) supplies no ratings at all
+> (`GeoapifyClient.cs:27,115` hardcodes `Rating: null`), so both were permanently
+> dead: the 3+/4+ star filter always returned zero results, and sorting by rating
+> was a silent no-op. Category filtering (the rest of US4) is implemented. See
+> `docs/superpowers/specs/2026-08-02-search-results-and-modal-polish-design.md`.
 
 ---
 

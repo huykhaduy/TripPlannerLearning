@@ -15,9 +15,12 @@ function formatCity(city: LocationSuggestion): string {
 export function CitySearchInput({
   onSelect,
   initialCity,
+  size = 'lg',
 }: {
   onSelect: (city: LocationSuggestion) => void;
   initialCity?: LocationSuggestion | null;
+  /** 'sm' fits a compact bar (e.g. once a city is already selected); 'lg' (default) fits the full hero. */
+  size?: 'lg' | 'sm';
 }) {
   const initialLabel = initialCity ? formatCity(initialCity) : '';
   const [query, setQuery] = useState(initialLabel);
@@ -122,7 +125,9 @@ export function CitySearchInput({
         aria-controls={listboxId}
         aria-autocomplete="list"
         aria-activedescendant={activeIndex >= 0 ? `${listboxId}-option-${activeIndex}` : undefined}
-        className="w-full rounded-full border border-slate-300 bg-white px-5 py-3 text-base text-slate-900 shadow-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-200"
+        className={`w-full rounded-full border border-slate-300 bg-white text-slate-900 shadow-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-200 ${
+          size === 'sm' ? 'px-4 py-2 text-sm' : 'px-5 py-3 text-base'
+        }`}
       />
       {loading && <p className="mt-2 text-sm text-white/80">Searching…</p>}
       {error && <p className="mt-2 text-sm font-medium text-rose-100">{error}</p>}
