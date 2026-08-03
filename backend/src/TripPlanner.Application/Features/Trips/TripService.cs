@@ -229,26 +229,7 @@ public class TripService : ITripService
             throw new ConflictException("This destination is already in that part of the trip.");
         }
 
-        var sourceDayId = item.ItineraryDayId;
-        item.ItineraryDayId = request.ItineraryDayId;
-
-        // Spec §11.1 US4-US6: insert at the requested position, then renumber
-        // 0..n so values stay dense. Clamp so "position 99" means "last".
-        var target = trip.Items
-            .Where(i => i.Id != item.Id && i.ItineraryDayId == request.ItineraryDayId)
-            .OrderBy(i => i.SortOrder)
-            .ToList();
-        target.Insert(Math.Min(request.SortOrder, target.Count), item);
-        Resequence(target);
-
-        // The bucket the item left keeps its relative order but closes the gap.
-        if (sourceDayId != request.ItineraryDayId)
-        {
-            Resequence(trip.Items
-                .Where(i => i.Id != item.Id && i.ItineraryDayId == sourceDayId)
-                .OrderBy(i => i.SortOrder)
-                .ToList());
-        }
+        MoveItem(trip, item, request.ItineraryDayId, request.SortOrder);
 
         try
         {
@@ -262,6 +243,33 @@ public class TripService : ITripService
         }
 
         return item.ToDestinationDto();
+    }
+
+    /// <summary>
+    /// Spec §11.1 US4-US6: move an item into <paramref name="targetDayId"/> (null =
+    /// Saved Places) at <paramref name="sortOrder"/>, then renumber both affected
+    /// buckets 0..n so values stay dense. The position is clamped, so "99" means last.
+    /// </summary>
+    private static void MoveItem(Trip trip, ItineraryItem item, Guid? targetDayId, int sortOrder)
+    {
+        var sourceDayId = item.ItineraryDayId;
+        item.ItineraryDayId = targetDayId;
+
+        var target = trip.Items
+            .Where(i => i.Id != item.Id && i.ItineraryDayId == targetDayId)
+            .OrderBy(i => i.SortOrder)
+            .ToList();
+        target.Insert(Math.Min(sortOrder, target.Count), item);
+        Resequence(target);
+
+        // The bucket the item left keeps its relative order but closes the gap.
+        if (sourceDayId != targetDayId)
+        {
+            Resequence(trip.Items
+                .Where(i => i.Id != item.Id && i.ItineraryDayId == sourceDayId)
+                .OrderBy(i => i.SortOrder)
+                .ToList());
+        }
     }
 
     private static void Resequence(List<ItineraryItem> bucket)
