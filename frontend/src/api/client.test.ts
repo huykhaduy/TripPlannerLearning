@@ -1,5 +1,5 @@
-import { AxiosError, AxiosHeaders } from 'axios';
 import { describe, expect, it } from 'vitest';
+import { httpError, networkError } from '../test/http';
 import { getErrorMessage, getErrorStatus } from './client';
 
 /**
@@ -8,23 +8,6 @@ import { getErrorMessage, getErrorStatus } from './client';
  * page's error handling routes through them.
  */
 describe('client error helpers', () => {
-  /** An axios error carrying a real HTTP response, as the interceptor would reject with. */
-  function httpError(status: number, data?: unknown): AxiosError {
-    const config = { headers: new AxiosHeaders() };
-    return new AxiosError('Request failed', 'ERR_BAD_REQUEST', config, undefined, {
-      status,
-      statusText: '',
-      data,
-      headers: new AxiosHeaders(),
-      config,
-    });
-  }
-
-  /** No response at all — DNS failure, connection refused, timeout. */
-  function networkError(): AxiosError {
-    return new AxiosError('Network Error', 'ERR_NETWORK');
-  }
-
   describe('getErrorMessage', () => {
     it("returns the backend's ProblemDetails detail when present", () => {
       const err = httpError(409, { detail: 'This destination is already in that part of the trip.' });

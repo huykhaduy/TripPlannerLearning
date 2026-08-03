@@ -180,10 +180,28 @@ initial render, so a leftover session would leak into the next test.
 
 Covered so far: the `client.ts` error helpers, `AuthProvider` (login/logout persistence,
 refresh restore, the reactive-logout listener, and that register does *not* start a
-session), and `ProtectedRoute`'s redirect. Tests that need the auth API mock it with
-`vi.mock('../api/auth', ...)`; "already signed in" is expressed by seeding
-`localStorage['tripplanner.user']` before render, since that is what `AuthProvider` reads.
-The feature pages themselves are still untested. `types.ts` covers `User`/`AuthResponse` plus every destination/trip
+session), `ProtectedRoute`'s redirect, and three feature pages — `LoginPage` (the 403 →
+resend-verification branch, and returning to the page that sent the user there),
+`TripsPage` (list/empty/load-error, the create-trip modal, and the F3/US10 status pill),
+and `DestinationDetailsPage` (404 → "not found" versus a retryable failure).
+
+Conventions these follow:
+
+- API modules are mocked wholesale with `vi.mock('../../api/<module>', ...)` — list every
+  export, since a partial factory makes the missing ones `undefined` at call time.
+- "Already signed in" is expressed by seeding `localStorage['tripplanner.user']` **before**
+  render, because that is what `AuthProvider` reads during its initial render.
+- Build axios rejections with `httpError(status, body)` / `networkError()` from
+  `src/test/http.ts` rather than hand-rolled objects, so `getErrorMessage`/`getErrorStatus`
+  take their real branches.
+- Date-dependent assertions (the status pill) are written **relative to today** via an
+  offset helper, so they cannot rot into failures on a future date.
+- `DestinationDetailsPage` needs an `AuthProvider` wrapper for its success path only —
+  `AddToTripButton` calls `useAuth`, and the error paths return before rendering it.
+
+Still untested: `TripDetailPage` (the largest page — day scheduling, reordering, the edit
+form), `RegisterPage`, `VerifyEmailPage`, `SearchPage`, and the destination sub-components
+(`CitySearchInput`, `AttractionsList`, `NearbyAttractions`, `AddToTripButton`). `types.ts` covers `User`/`AuthResponse` plus every destination/trip
 DTO consumed by the feature pages — add new shared shapes here rather than declaring
 ad-hoc inline interfaces in components.
 
