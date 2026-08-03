@@ -12,6 +12,13 @@ namespace TripPlanner.WebApi.Tests;
 /// </summary>
 public class FakeDestinationProvider : IDestinationProvider
 {
+    /// <summary>
+    /// Any id with this prefix is reported as unknown (null), the way Geoapify answers
+    /// for an id it does not recognise. Without it every id is a hit and the
+    /// "not found by provider OR database" 404 path is unreachable from a test.
+    /// </summary>
+    public const string UnknownIdPrefix = "unknown-";
+
     public Task<IReadOnlyList<LocationSuggestionDto>> SearchLocationsAsync(string query, CancellationToken cancellationToken = default) =>
         Task.FromResult<IReadOnlyList<LocationSuggestionDto>>([]);
 
@@ -19,17 +26,19 @@ public class FakeDestinationProvider : IDestinationProvider
         Task.FromResult<IReadOnlyList<DestinationSummaryDto>>([]);
 
     public Task<DestinationDetailsDto?> GetDestinationDetailsAsync(string providerId, CancellationToken cancellationToken = default) =>
-        Task.FromResult<DestinationDetailsDto?>(new DestinationDetailsDto(
-            ProviderId: providerId,
-            Name: $"Fake Place {providerId}",
-            Category: "landmark",
-            Description: "A fake destination for tests.",
-            ImageUrl: "https://example.com/fake.png",
-            Latitude: 35.0,
-            Longitude: 139.0,
-            Address: "1 Fake Street",
-            Website: null,
-            OpeningHours: null));
+        providerId.StartsWith(UnknownIdPrefix, StringComparison.Ordinal)
+            ? Task.FromResult<DestinationDetailsDto?>(null)
+            : Task.FromResult<DestinationDetailsDto?>(new DestinationDetailsDto(
+                ProviderId: providerId,
+                Name: $"Fake Place {providerId}",
+                Category: "landmark",
+                Description: "A fake destination for tests.",
+                ImageUrl: "https://example.com/fake.png",
+                Latitude: 35.0,
+                Longitude: 139.0,
+                Address: "1 Fake Street",
+                Website: null,
+                OpeningHours: null));
 }
 
 public class FakeImageSearchProvider : IImageSearchProvider
