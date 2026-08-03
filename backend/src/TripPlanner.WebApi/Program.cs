@@ -1,6 +1,7 @@
 using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using TripPlanner.Application;
@@ -32,42 +33,28 @@ builder.Services.AddControllers();
 // ---------------------------------------------------------------------------
 // 2. Authentication — validate the JWTs issued by JwtTokenGenerator.
 // ---------------------------------------------------------------------------
-var jwtSection = builder.Configuration.GetSection(JwtSettings.SectionName);
-
-// Blank, not just missing: .env.example ships "Jwt__Key=" with no value, so an
-// empty string is the usual first-run mistake.
-var jwtKey = jwtSection["Key"];
-if (string.IsNullOrWhiteSpace(jwtKey))
-{
-    throw new InvalidOperationException(
-        "Jwt__Key is not configured. Copy backend/src/TripPlanner.WebApi/.env.example to .env "
-        + "and set Jwt__Key to a random secret of at least 32 characters.");
-}
-
-var jwtKeyBytes = Encoding.UTF8.GetBytes(jwtKey);
-if (jwtKeyBytes.Length < JwtSettings.MinKeyBytes)
-{
-    // A short key otherwise survives startup and throws on the first login.
-    throw new InvalidOperationException(
-        $"Jwt__Key is too short ({jwtKeyBytes.Length} bytes). HMAC-SHA256 signing requires at least "
-        + $"{JwtSettings.MinKeyBytes} — set Jwt__Key in backend/src/TripPlanner.WebApi/.env to a longer random secret.");
-}
-
-var signingKey = new SymmetricSecurityKey(jwtKeyBytes);
-
+// JwtSettings is bound and validated in AddInfrastructure (including the
+// fail-at-startup checks on Jwt__Key). Reading it through IOptions here rather than
+// off builder.Configuration keeps configuration resolution deferred, which is what
+// lets the test host supply its own values — see CustomWebApplicationFactory.
 builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-    .AddJwtBearer(options =>
+    .AddJwtBearer();
+
+builder.Services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme)
+    .Configure<IOptions<JwtSettings>>((bearer, jwtOptions) =>
     {
-        options.TokenValidationParameters = new TokenValidationParameters
+        var jwt = jwtOptions.Value;
+        bearer.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuer = true,
             ValidateAudience = true,
             ValidateLifetime = true,
             ValidateIssuerSigningKey = true,
-            ValidIssuer = jwtSection["Issuer"] ?? JwtSettings.DefaultIssuer,
-            ValidAudience = jwtSection["Audience"] ?? JwtSettings.DefaultAudience,
-            IssuerSigningKey = signingKey,
+            // JwtSettings defaults these, so no ?? fallback is needed here.
+            ValidIssuer = jwt.Issuer,
+            ValidAudience = jwt.Audience,
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwt.Key)),
             ClockSkew = TimeSpan.Zero,
         };
     });

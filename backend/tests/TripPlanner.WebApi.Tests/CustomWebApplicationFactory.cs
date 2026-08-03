@@ -5,15 +5,16 @@ using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using TripPlanner.Application.Common.Interfaces;
+using TripPlanner.Infrastructure.Identity;
 using TripPlanner.Infrastructure.Persistence;
 
 namespace TripPlanner.WebApi.Tests;
 
 /// <summary>
-/// Boots the real <see cref="Program"/> for HTTP-level tests, with two swaps:
-/// Postgres becomes a fresh EF Core InMemory database per factory instance, and
-/// the secrets Program.cs reads at startup are set as environment variables —
-/// the constructor is the only hook that runs early enough to beat it.
+/// Boots the real <see cref="Program"/> for HTTP-level tests: Postgres becomes a
+/// fresh EF Core InMemory database per factory instance, the external travel/image
+/// providers become deterministic fakes, and Jwt:Key is supplied as ordinary test
+/// configuration (nothing reads it until the options are resolved).
 /// </summary>
 public class CustomWebApplicationFactory : WebApplicationFactory<Program>
 {
@@ -24,17 +25,10 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>
     // request would otherwise get its own empty database.
     private readonly string _databaseName = $"WebApiTests-{Guid.NewGuid()}";
 
-    public CustomWebApplicationFactory()
-    {
-        Environment.SetEnvironmentVariable("Jwt__Key", TestJwtKey);
-        Environment.SetEnvironmentVariable(
-            "ConnectionStrings__Postgres",
-            "Host=localhost;Database=unused;Username=unused;Password=unused");
-    }
-
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Testing");
+        builder.UseSetting($"{JwtSettings.SectionName}:Key", TestJwtKey);
 
         builder.ConfigureServices(services =>
         {

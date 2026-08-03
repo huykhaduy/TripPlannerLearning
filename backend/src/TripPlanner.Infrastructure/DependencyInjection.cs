@@ -1,3 +1,4 @@
+using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Configuration;
@@ -23,8 +24,25 @@ public static class DependencyInjection
     {
         AddPersistence(services, configuration);
 
-        // Options pattern: bind the "Jwt" section to JwtSettings.
-        services.Configure<JwtSettings>(configuration.GetSection(JwtSettings.SectionName));
+        // Options pattern: bind the "Jwt" section to JwtSettings, and validate the
+        // signing key at host startup rather than on the first login attempt.
+        //
+        // ValidateOnStart (not an eager configuration read in Program.cs) is what lets
+        // WebApplicationFactory-based tests supply Jwt:Key through normal configuration:
+        // a read in a top-level statement happens before any test hook can layer values in.
+        services.AddOptions<JwtSettings>()
+            .Bind(configuration.GetSection(JwtSettings.SectionName))
+            .Validate(
+                settings => !string.IsNullOrWhiteSpace(settings.Key),
+                "Jwt__Key is not configured. Copy backend/src/TripPlanner.WebApi/.env.example to .env "
+                    + "and set Jwt__Key to a random secret of at least 32 characters.")
+            .Validate(
+                // A short key otherwise survives startup and throws on the first login.
+                settings => string.IsNullOrWhiteSpace(settings.Key)
+                    || Encoding.UTF8.GetByteCount(settings.Key) >= JwtSettings.MinKeyBytes,
+                $"Jwt__Key is too short. HMAC-SHA256 signing requires at least {JwtSettings.MinKeyBytes} bytes "
+                    + "— set Jwt__Key in backend/src/TripPlanner.WebApi/.env to a longer random secret.")
+            .ValidateOnStart();
 
         // Security primitives.
         services.AddScoped<IPasswordHasher, BCryptPasswordHasher>();

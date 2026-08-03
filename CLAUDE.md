@@ -156,10 +156,14 @@ factory instance. Two things to know before touching it:
 
 `Program.cs`'s automatic migration-on-startup is skipped when `app.Environment.IsEnvironment("Testing")`
 (set via `builder.UseEnvironment("Testing")` in the factory) — the InMemory provider doesn't
-support migrations at all. Required secrets Program.cs reads directly at startup (`Jwt:Key`,
-`ConnectionStrings:Postgres`) are supplied as real process environment variables in the
-factory's constructor, since that's the only override point guaranteed to run before
-`WebApplication.CreateBuilder`'s own `AddEnvironmentVariables()` call. The email-verification
+support migrations at all. `Jwt:Key` is supplied via `builder.UseSetting(...)`, which wins
+over the process environment variables `DotNetEnv.Env.Load()` creates from a developer's
+local `.env` — `TestHostConfigurationTests` pins that precedence, so the suite can never
+silently start signing tokens with someone's real key. No secret needs to be an environment
+variable, because nothing is read eagerly during startup any more: `Jwt` is bound and
+validated as options in `AddInfrastructure` (`ValidateOnStart`), and the Postgres connection
+string is only read inside `AddPersistence`, whose registration the factory replaces
+outright. The email-verification
 flow is driven by minting a token directly via `IJwtTokenGenerator` (resolved from
 `factory.Services`) rather than intercepting a real email — see `AuthTestHelper.cs`.
 
@@ -177,8 +181,11 @@ flow is driven by minting a token directly via `IJwtTokenGenerator` (resolved fr
 - API URL: `http://localhost:5080`; frontend `.env` → `VITE_API_BASE_URL=http://localhost:5080/api`
 - JWT: `Jwt__Issuer`/`Jwt__Audience`/`Jwt__ExpiryMinutes` are optional overrides (defaults live in
   `JwtSettings.cs`: `TripPlanner`/`TripPlannerClient`/`60`). `Jwt__Key` is the one required,
-  no-default value — a defaulted signing key would defeat JWT security, so `Program.cs` throws at
-  startup if it's unset rather than falling back, unlike the URL fallbacks below.
+  no-default value — a defaulted signing key would defeat JWT security, so `AddInfrastructure`
+  registers it with `.Validate(...).ValidateOnStart()` (blank, and shorter than
+  `JwtSettings.MinKeyBytes`) and the host refuses to start rather than falling back, unlike the
+  URL fallbacks below. Validation lives in the options registration, not in `Program.cs`: an
+  eager `builder.Configuration[...]` read runs before any test host can layer in its own value.
 - Database is PostgreSQL only (no SQLite/InMemory fallback outside tests) — required, no default:
   run `docker compose up -d` and set `ConnectionStrings__Postgres` in `.env` (see `.env.example`).
 - Destination browse-path caching (`DestinationService`) defaults to an in-process `IDistributedCache`.
