@@ -34,11 +34,8 @@ builder.Services.AddControllers();
 // ---------------------------------------------------------------------------
 var jwtSection = builder.Configuration.GetSection(JwtSettings.SectionName);
 
-// Fail fast, naming both the setting and the file it belongs in. Note the check
-// is for BLANK, not just missing: .env.example ships "Jwt__Key=" with no value,
-// so the usual first-run mistake is an empty string. Left unguarded, startup
-// died inside Encoding.UTF8.GetBytes/SymmetricSecurityKey with a message
-// ("Value cannot be null. (Parameter 's')") that names neither.
+// Blank, not just missing: .env.example ships "Jwt__Key=" with no value, so an
+// empty string is the usual first-run mistake.
 var jwtKey = jwtSection["Key"];
 if (string.IsNullOrWhiteSpace(jwtKey))
 {
@@ -50,8 +47,7 @@ if (string.IsNullOrWhiteSpace(jwtKey))
 var jwtKeyBytes = Encoding.UTF8.GetBytes(jwtKey);
 if (jwtKeyBytes.Length < JwtSettings.MinKeyBytes)
 {
-    // A short key survives startup but throws on the FIRST login attempt,
-    // deep inside the signing call — catch it here where the fix is obvious.
+    // A short key otherwise survives startup and throws on the first login.
     throw new InvalidOperationException(
         $"Jwt__Key is too short ({jwtKeyBytes.Length} bytes). HMAC-SHA256 signing requires at least "
         + $"{JwtSettings.MinKeyBytes} — set Jwt__Key in backend/src/TripPlanner.WebApi/.env to a longer random secret.");

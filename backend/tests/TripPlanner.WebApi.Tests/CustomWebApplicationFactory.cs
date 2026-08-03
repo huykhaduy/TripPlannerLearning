@@ -11,23 +11,17 @@ namespace TripPlanner.WebApi.Tests;
 
 /// <summary>
 /// Boots the real <see cref="Program"/> for HTTP-level tests, with two swaps:
-/// (1) the Postgres-backed <see cref="ApplicationDbContext"/> is replaced by a
-/// fresh EF Core InMemory database per factory instance, so tests need no
-/// Docker/Postgres; (2) required-secret config (Jwt:Key, ConnectionStrings:Postgres)
-/// that Program.cs reads directly at startup — before any WebApplicationFactory
-/// hook gets a chance to override it — is supplied as real process environment
-/// variables in the constructor, the same mechanism a real .env file uses.
+/// Postgres becomes a fresh EF Core InMemory database per factory instance, and
+/// the secrets Program.cs reads at startup are set as environment variables —
+/// the constructor is the only hook that runs early enough to beat it.
 /// </summary>
 public class CustomWebApplicationFactory : WebApplicationFactory<Program>
 {
     public const string TestJwtKey = "test-only-signing-key-do-not-use-in-real-environments-12345";
 
-    // Captured once per factory instance and reused inside the options lambda
-    // below. AddDbContext's optionsLifetime defaults to Scoped (not Singleton),
-    // so the lambda re-runs once per DI scope (i.e. once per HTTP request, and
-    // again for every factory.Services.CreateScope() a test opens) — inlining
-    // Guid.NewGuid() directly in the lambda would hand every scope its own
-    // fresh, empty database instead of one shared per factory instance.
+    // Must be a field, not inlined into the options lambda below: AddDbContext's
+    // optionsLifetime is Scoped, so the lambda re-runs per DI scope and every
+    // request would otherwise get its own empty database.
     private readonly string _databaseName = $"WebApiTests-{Guid.NewGuid()}";
 
     public CustomWebApplicationFactory()
@@ -44,14 +38,10 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>
 
         builder.ConfigureServices(services =>
         {
-            // AddDbContext<T> doesn't just register DbContextOptions<T> — since
-            // EF Core 5 it also registers the options-building action itself as a
-            // composable IDbContextOptionsConfiguration<T>, so that multiple
-            // AddDbContext<T> calls layer their configuration together instead of
-            // replacing each other. Removing only DbContextOptions<T> leaves that
-            // configuration entry behind, so Program's UseNpgsql(...) action still
-            // runs alongside ours below — both providers end up configured on the
-            // same options, which EF Core rejects. Both must be removed.
+            // Both registrations must go. AddDbContext also registers its options
+            // action as a composable IDbContextOptionsConfiguration<T>, so removing
+            // only DbContextOptions<T> leaves Program's UseNpgsql in place and EF
+            // Core rejects having two providers on the same options.
             services.RemoveAll<DbContextOptions<ApplicationDbContext>>();
             services.RemoveAll<IDbContextOptionsConfiguration<ApplicationDbContext>>();
 

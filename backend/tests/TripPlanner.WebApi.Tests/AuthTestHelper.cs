@@ -7,12 +7,10 @@ using TripPlanner.Application.Features.Auth.Dtos;
 namespace TripPlanner.WebApi.Tests;
 
 /// <summary>
-/// Drives the real register/verify/login HTTP flow for tests that need an
-/// authenticated user, without ever sending a real email: the verification
-/// token is minted directly via <see cref="IJwtTokenGenerator"/> (resolved
-/// from the factory's DI container), the same way the emailed link's token
-/// would be produced — <see cref="TripPlanner.Infrastructure.Email.SmtpEmailSender"/>
-/// itself silently no-ops when unconfigured, so no email is ever sent or needed.
+/// Drives the real register/verify/login HTTP flow for tests needing an
+/// authenticated user. No email is involved: the verification token is minted
+/// straight from <see cref="IJwtTokenGenerator"/>, exactly as the emailed link
+/// would have been.
 /// </summary>
 public static class AuthTestHelper
 {

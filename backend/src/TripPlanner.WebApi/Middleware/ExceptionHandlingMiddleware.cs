@@ -56,12 +56,9 @@ public class ExceptionHandlingMiddleware
             _logger.LogError(exception, "Unhandled exception");
         }
 
-        // exception.Message is safe to echo back for the exceptions above: each is
-        // thrown deliberately from the Application layer with a client-facing
-        // message. An exception that falls through to the generic 500 branch was
-        // NOT written for client consumption — it may be a raw DbUpdateException,
-        // NullReferenceException, etc. whose message can contain SQL/internal
-        // details, so only expose it outside Development.
+        // The mapped exceptions above carry client-facing messages by design.
+        // Anything reaching the generic 500 branch does not — its message may
+        // hold SQL or other internals, so only Development sees it.
         var detail = status == HttpStatusCode.InternalServerError && !_environment.IsDevelopment()
             ? "An unexpected error occurred."
             : exception.Message;
