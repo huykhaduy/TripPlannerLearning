@@ -337,22 +337,7 @@ public class TripService : ITripService
 
         var destination = details.ToEntity();
 
-        // The provider's own image data is sparse (Geoapify only has
-        // wiki_and_media for some places) — fall back to a Serper image search
-        // by name, same source the attraction cards use, so a saved
-        // destination isn't stuck showing the placeholder icon everywhere.
-        if (destination.ImageUrl is null)
-        {
-            try
-            {
-                destination.ImageUrl = await _imageSearch.SearchImageAsync(destination.Name, cancellationToken);
-            }
-            catch (Exception ex) when (IsTransientExternalFailure(ex) && !cancellationToken.IsCancellationRequested)
-            {
-                // Serper down, timed out, or returned something unparseable —
-                // the destination is still saved, just without a photo.
-            }
-        }
+        await TryFillMissingImageAsync(destination, cancellationToken);
 
         try
         {
@@ -365,6 +350,33 @@ public class TripService : ITripService
             // place first. Use the winner's row instead of ours.
             return await _destinations.GetByProviderIdAsync(providerId, cancellationToken)
                 ?? throw new InvalidOperationException($"Destination '{providerId}' vanished after a concurrency conflict.");
+        }
+    }
+
+    /// <summary>
+    /// The provider's own image data is sparse (Geoapify only has wiki_and_media for
+    /// some places), so fall back to a Serper image search by name — the same source
+    /// the attraction cards use, so a saved destination isn't stuck showing the
+    /// placeholder icon everywhere.
+    ///
+    /// Best-effort by design: a Serper outage leaves the destination saved without a
+    /// photo rather than failing the add. Does nothing if the provider already gave
+    /// us an image.
+    /// </summary>
+    private async Task TryFillMissingImageAsync(Destination destination, CancellationToken cancellationToken)
+    {
+        if (destination.ImageUrl is not null)
+        {
+            return;
+        }
+
+        try
+        {
+            destination.ImageUrl = await _imageSearch.SearchImageAsync(destination.Name, cancellationToken);
+        }
+        catch (Exception ex) when (IsTransientExternalFailure(ex) && !cancellationToken.IsCancellationRequested)
+        {
+            // Already logged by SerperImageClient; the destination is still saved.
         }
     }
 
