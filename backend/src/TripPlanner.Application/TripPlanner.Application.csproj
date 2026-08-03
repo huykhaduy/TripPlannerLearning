@@ -3,9 +3,10 @@
   <!--
     APPLICATION LAYER
     Use cases / business workflows. Depends ONLY on the Domain layer.
-    It defines INTERFACES (e.g. IPasswordHasher, IJwtTokenGenerator,
-    IRepository&lt;T&gt;, IUnitOfWork) that the Infrastructure layer implements. This is the
-    Dependency Inversion Principle in action — the inner layer owns the contract.
+    It defines INTERFACES (e.g. IPasswordHasher, IJwtTokenGenerator, and one
+    repository per aggregate: IUserRepository, ITripRepository, IDestinationRepository)
+    that the Infrastructure layer implements. This is the Dependency Inversion
+    Principle in action — the inner layer owns the contract.
   -->
   <ItemGroup>
     <ProjectReference Include="..\TripPlanner.Domain\TripPlanner.Domain.csproj" />
