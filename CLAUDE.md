@@ -47,6 +47,10 @@ npm install
 npm run dev        # Dev server at http://localhost:5173
 npm run build      # Type-check + Vite build
 npm run lint       # tsc --noEmit + ESLint (flat config in eslint.config.js)
+npm test           # Vitest (single run); npm run test:watch for watch mode
+
+# Run a single test file
+npx vitest run src/auth/AuthContext.test.tsx
 ```
 
 ### Quick start (both servers, from repo root)
@@ -162,7 +166,24 @@ import `axios`** — components call these helpers instead of narrowing the erro
 so the HTTP library stays swappable and out of the presentation layer.
 `destinations.ts` and `trips.ts`
 follow `auth.ts`'s pattern: thin typed wrappers over `apiClient`, no raw `fetch`/`axios`
-calls in components. `types.ts` covers `User`/`AuthResponse` plus every destination/trip
+calls in components.
+
+**Frontend tests** run on Vitest + React Testing Library in a `jsdom` environment,
+configured in the `test` block of `vite.config.ts` with `src/test/setup.ts` as the setup
+file. `globals` is deliberately **false**: test files import `describe`/`it`/`expect` from
+`vitest` explicitly, which means the existing `tsconfig.json` (whose `include` already
+covers `src`) type-checks them with no `types` entry — so `npm run lint` checks the tests
+too, and a wrong mock signature fails the build rather than passing silently. Because
+globals are off, RTL cannot register its own `afterEach`, so setup.ts calls `cleanup()`
+**and** `localStorage.clear()` by hand — `AuthProvider` reads localStorage during its
+initial render, so a leftover session would leak into the next test.
+
+Covered so far: the `client.ts` error helpers, `AuthProvider` (login/logout persistence,
+refresh restore, the reactive-logout listener, and that register does *not* start a
+session), and `ProtectedRoute`'s redirect. Tests that need the auth API mock it with
+`vi.mock('../api/auth', ...)`; "already signed in" is expressed by seeding
+`localStorage['tripplanner.user']` before render, since that is what `AuthProvider` reads.
+The feature pages themselves are still untested. `types.ts` covers `User`/`AuthResponse` plus every destination/trip
 DTO consumed by the feature pages — add new shared shapes here rather than declaring
 ad-hoc inline interfaces in components.
 
