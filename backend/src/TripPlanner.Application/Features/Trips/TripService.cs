@@ -22,6 +22,12 @@ namespace TripPlanner.Application.Features.Trips;
 /// </summary>
 public class TripService : ITripService
 {
+    /// <summary>
+    /// Shared by the in-memory duplicate check and the unique-index backstop, so the
+    /// caller cannot tell which one rejected the request — they mean the same thing.
+    /// </summary>
+    private const string DuplicateDestinationMessage = "This destination is already in that part of the trip.";
+
     private readonly ITripRepository _trips;
     private readonly IDestinationRepository _destinations;
     private readonly ICurrentUserService _currentUser;
@@ -174,11 +180,7 @@ public class TripService : ITripService
 
         var destination = await GetOrCreateDestinationAsync(request.ProviderId, cancellationToken);
 
-        // Duplicate rule (US4/US6): once per day — and per Saved Places bucket.
-        if (trip.Items.Any(i => i.DestinationId == destination.Id && i.ItineraryDayId == request.ItineraryDayId))
-        {
-            throw new ConflictException("This destination is already in that part of the trip.");
-        }
+        EnsureNotDuplicate(trip, destination.Id, request.ItineraryDayId);
 
         var bucket = trip.Items.Where(i => i.ItineraryDayId == request.ItineraryDayId).ToList();
 
@@ -192,16 +194,7 @@ public class TripService : ITripService
         };
         trip.Items.Add(item);
 
-        try
-        {
-            await _trips.UpdateAsync(trip, cancellationToken);
-        }
-        catch (ConcurrencyException)
-        {
-            // Unique index (ItineraryDayId, DestinationId): a concurrent request
-            // added the same destination between our check and the save.
-            throw new ConflictException("This destination is already in that part of the trip.");
-        }
+        await SaveWithDuplicateGuardAsync(trip, cancellationToken);
 
         return item.ToDestinationDto();
     }
@@ -220,29 +213,54 @@ public class TripService : ITripService
 
         await EnsureDayBelongsToTripAsync(request.ItineraryDayId, trip.Id, cancellationToken);
 
-        // Duplicate rule on the TARGET day (US4/US6) — the moved item itself is
-        // exempt, so reordering within the same day passes this check.
-        if (trip.Items.Any(i => i.Id != item.Id
-                && i.DestinationId == item.DestinationId
-                && i.ItineraryDayId == request.ItineraryDayId))
-        {
-            throw new ConflictException("This destination is already in that part of the trip.");
-        }
+        // The moved item is exempt from its own duplicate check, so reordering
+        // within the same day passes.
+        EnsureNotDuplicate(trip, item.DestinationId, request.ItineraryDayId, excludeItemId: item.Id);
 
         MoveItem(trip, item, request.ItineraryDayId, request.SortOrder);
 
+        // One save: both affected buckets move atomically.
+        await SaveWithDuplicateGuardAsync(trip, cancellationToken);
+
+        return item.ToDestinationDto();
+    }
+
+    /// <summary>
+    /// Duplicate rule (US4/US6): a destination appears at most once per day, and at
+    /// most once in the Saved Places bucket. Pass <paramref name="excludeItemId"/>
+    /// when moving an existing item so it cannot conflict with itself.
+    /// </summary>
+    private static void EnsureNotDuplicate(Trip trip, Guid destinationId, Guid? itineraryDayId, Guid? excludeItemId = null)
+    {
+        if (trip.Items.Any(i => i.Id != excludeItemId
+                && i.DestinationId == destinationId
+                && i.ItineraryDayId == itineraryDayId))
+        {
+            throw new ConflictException(DuplicateDestinationMessage);
+        }
+    }
+
+    /// <summary>
+    /// Saves the trip aggregate, translating a unique-index violation on
+    /// (ItineraryDayId, DestinationId) into the same conflict
+    /// <see cref="EnsureNotDuplicate"/> raises — that index is the backstop for a
+    /// concurrent request slipping the same destination in between the check and
+    /// the save.
+    ///
+    /// Only for the two paths that add or move an item. <c>UpdateTripAsync</c>
+    /// deliberately saves directly: a date change cannot violate that index, so
+    /// reporting "duplicate destination" there would be a lie.
+    /// </summary>
+    private async Task SaveWithDuplicateGuardAsync(Trip trip, CancellationToken cancellationToken)
+    {
         try
         {
-            await _trips.UpdateAsync(trip, cancellationToken); // single save: both buckets move atomically
+            await _trips.UpdateAsync(trip, cancellationToken);
         }
         catch (ConcurrencyException)
         {
-            // Unique index (ItineraryDayId, DestinationId): a concurrent request
-            // put the same destination into the target day between check and save.
-            throw new ConflictException("This destination is already in that part of the trip.");
+            throw new ConflictException(DuplicateDestinationMessage);
         }
-
-        return item.ToDestinationDto();
     }
 
     /// <summary>
