@@ -137,6 +137,32 @@ private static ApplicationDbContext CreateDb() =>
 
 Arrange with a fresh `CreateDb()`, construct the service under test with real implementations where cheap (e.g. `BCryptPasswordHasher`) and `Mock<T>` for everything else.
 
+`TripPlanner.WebApi.Tests` covers what the above can't: real HTTP routing, `[Authorize]`
+enforcement, and `ExceptionHandlingMiddleware`'s exception-to-status-code mapping. Uses
+`WebApplicationFactory<Program>` against the real `Program` (see `CustomWebApplicationFactory.cs`),
+with `ApplicationDbContext` swapped from Npgsql to a fresh EF Core InMemory database per
+factory instance. Two things to know before touching it:
+
+- `AddDbContext`'s `optionsLifetime` defaults to **Scoped**, not Singleton — the InMemory
+  database name must be generated *once* and captured (a field), never inlined as
+  `Guid.NewGuid()` directly in the options lambda, or every DI scope (every request, and
+  every `factory.Services.CreateScope()` a test opens) gets its own empty database.
+- Removing `DbContextOptions<ApplicationDbContext>` alone isn't enough to swap providers —
+  `AddDbContext` also registers the configuring action itself as a composable
+  `IDbContextOptionsConfiguration<T>` (so multiple `AddDbContext` calls layer instead of
+  replacing each other); leaving that behind means Program's `UseNpgsql(...)` and the
+  test's `UseInMemoryDatabase(...)` both apply to the same options, and EF Core throws.
+  Remove both.
+
+`Program.cs`'s automatic migration-on-startup is skipped when `app.Environment.IsEnvironment("Testing")`
+(set via `builder.UseEnvironment("Testing")` in the factory) — the InMemory provider doesn't
+support migrations at all. Required secrets Program.cs reads directly at startup (`Jwt:Key`,
+`ConnectionStrings:Postgres`) are supplied as real process environment variables in the
+factory's constructor, since that's the only override point guaranteed to run before
+`WebApplication.CreateBuilder`'s own `AddEnvironmentVariables()` call. The email-verification
+flow is driven by minting a token directly via `IJwtTokenGenerator` (resolved from
+`factory.Services`) rather than intercepting a real email — see `AuthTestHelper.cs`.
+
 ## Configuration
 
 - **There is no `appsettings.json`/`appsettings.Development.json`** — all configuration is either a

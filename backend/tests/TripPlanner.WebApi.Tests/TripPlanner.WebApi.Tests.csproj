@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <!--
+    Integration tests for the Web API layer: routing, [Authorize] enforcement,
+    and ExceptionHandlingMiddleware's exception-to-HTTP-status mapping — none of
+    which the Application-layer unit tests can exercise, since they call
+    services directly and never go through HTTP. Uses WebApplicationFactory
+    against the real Program, with the Postgres-backed ApplicationDbContext
+    swapped for a fresh EF Core InMemory database per factory instance (see
+    CustomWebApplicationFactory) so these tests need no Docker/Postgres.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\TripPlanner.Application\TripPlanner.Application.csproj" />
+    <ProjectReference Include="..\..\src\TripPlanner.Infrastructure\TripPlanner.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\TripPlanner.WebApi\TripPlanner.WebApi.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.9" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="10.0.9" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+
+</Project>

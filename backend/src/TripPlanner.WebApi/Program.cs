@@ -95,8 +95,14 @@ var app = builder.Build();
 // ---------------------------------------------------------------------------
 // 5. Apply EF Core migrations automatically on startup (handy in development).
 //    Run `dotnet ef migrations add InitialCreate` once before the first start.
+//    Skipped in the "Testing" environment: WebApplicationFactory-based tests
+//    swap in the EF Core InMemory provider, which doesn't support migrations
+//    at all (GetPendingMigrations throws on a non-relational provider).
 // ---------------------------------------------------------------------------
-await ApplyMigrationsAsync(app);
+if (!app.Environment.IsEnvironment("Testing"))
+{
+    await ApplyMigrationsAsync(app);
+}
 
 // ---------------------------------------------------------------------------
 // 6. HTTP request pipeline. Order matters.
