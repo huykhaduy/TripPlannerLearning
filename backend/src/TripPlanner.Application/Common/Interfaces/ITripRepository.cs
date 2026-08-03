@@ -29,19 +29,6 @@ public interface ITripRepository
     /// <summary>Inserts the trip and persists immediately.</summary>
     Task AddAsync(Trip trip, CancellationToken cancellationToken = default);
 
-    /// <summary>
-    /// Stages a new day for insertion, without saving — call alongside adding it to
-    /// <c>trip.Days</c>, then persist the whole aggregate with <see cref="UpdateAsync"/>.
-    ///
-    /// Required because <c>BaseEntity</c> self-assigns its Guid key, so EF sees a
-    /// non-default key on a newly discovered child and classifies it as an existing
-    /// row (UPDATE) rather than a new one (INSERT).
-    /// </summary>
-    void AddDay(ItineraryDay day);
-
-    /// <summary>Stages a new item for insertion, without saving. See <see cref="AddDay"/>.</summary>
-    void AddItem(ItineraryItem item);
-
     /// <summary>Persists every pending change to the trip and its days/items in one save.</summary>
     Task UpdateAsync(Trip trip, CancellationToken cancellationToken = default);
 

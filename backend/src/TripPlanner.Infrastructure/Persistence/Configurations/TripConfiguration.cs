@@ -10,6 +10,9 @@ public class TripConfiguration : IEntityTypeConfiguration<Trip>
     {
         builder.HasKey(t => t.Id);
 
+        // See UserConfiguration — BaseEntity supplies the key, not the store.
+        builder.Property(t => t.Id).ValueGeneratedNever();
+
         builder.Property(t => t.Name).IsRequired().HasMaxLength(200);
 
         builder.HasMany(t => t.Days)
@@ -30,6 +33,10 @@ public class ItineraryDayConfiguration : IEntityTypeConfiguration<ItineraryDay>
     {
         builder.HasKey(d => d.Id);
 
+        // See UserConfiguration — this is the one that actually bit us: a new day
+        // added to trip.Days was being saved as an UPDATE.
+        builder.Property(d => d.Id).ValueGeneratedNever();
+
         builder.HasMany(d => d.Items)
             .WithOne(i => i.ItineraryDay!)
             .HasForeignKey(i => i.ItineraryDayId)
@@ -42,6 +49,9 @@ public class ItineraryItemConfiguration : IEntityTypeConfiguration<ItineraryItem
     public void Configure(EntityTypeBuilder<ItineraryItem> builder)
     {
         builder.HasKey(i => i.Id);
+
+        // See UserConfiguration — BaseEntity supplies the key, not the store.
+        builder.Property(i => i.Id).ValueGeneratedNever();
 
         builder.HasOne(i => i.Destination)
             .WithMany()

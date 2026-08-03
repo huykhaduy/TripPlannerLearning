@@ -10,6 +10,9 @@ public class DestinationConfiguration : IEntityTypeConfiguration<Destination>
     {
         builder.HasKey(d => d.Id);
 
+        // See UserConfiguration — BaseEntity supplies the key, not the store.
+        builder.Property(d => d.Id).ValueGeneratedNever();
+
         builder.Property(d => d.ProviderId).IsRequired().HasMaxLength(128);
         builder.HasIndex(d => d.ProviderId).IsUnique(); // Cache one row per external place.
 

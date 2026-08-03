@@ -48,10 +48,6 @@ public class TripRepository : ITripRepository
         await _context.SaveChangesAsync(cancellationToken);
     }
 
-    public void AddDay(ItineraryDay day) => _context.ItineraryDays.Add(day);
-
-    public void AddItem(ItineraryItem item) => _context.ItineraryItems.Add(item);
-
     /// <summary>
     /// The trip and its days/items are already tracked, so this only needs to flush —
     /// EF writes the whole graph in one transaction.

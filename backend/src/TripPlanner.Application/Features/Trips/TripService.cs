@@ -151,11 +151,7 @@ public class TripService : ITripService
         var existingDates = trip.Days.Select(d => d.Date).ToHashSet();
         foreach (var date in targetDates.Where(d => !existingDates.Contains(d)))
         {
-            var day = new ItineraryDay { TripId = trip.Id, Date = date };
-            trip.Days.Add(day);
-            // Explicit staging: BaseEntity self-assigns the Guid key, so EF would
-            // otherwise classify this as an EXISTING row (UPDATE, not INSERT).
-            _trips.AddDay(day);
+            trip.Days.Add(new ItineraryDay { TripId = trip.Id, Date = date });
         }
 
         var dayNumber = 1;
@@ -195,7 +191,6 @@ public class TripService : ITripService
             SortOrder = bucket.Count == 0 ? 0 : bucket.Max(i => i.SortOrder) + 1,
         };
         trip.Items.Add(item);
-        _trips.AddItem(item); // see AddDay — self-assigned key would otherwise mean UPDATE
 
         try
         {

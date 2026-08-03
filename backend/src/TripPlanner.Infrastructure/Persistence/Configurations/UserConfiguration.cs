@@ -10,6 +10,11 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
     {
         builder.HasKey(u => u.Id);
 
+        // BaseEntity assigns its own Guid, so EF must not treat the key as
+        // store-generated — otherwise a new child arriving with a key already set
+        // is mistaken for an existing row and saved as an UPDATE instead of an INSERT.
+        builder.Property(u => u.Id).ValueGeneratedNever();
+
         builder.Property(u => u.Email).IsRequired().HasMaxLength(256);
         builder.HasIndex(u => u.Email).IsUnique(); // Enforce unique email at the DB level.
 
