@@ -52,3 +52,16 @@ export function getToken(): string | null {
 export function getErrorMessage(err: unknown, fallback: string): string {
   return axios.isAxiosError(err) ? (err.response?.data?.detail ?? fallback) : fallback;
 }
+
+/**
+ * The HTTP status of a failed request, or undefined if it never got a response
+ * (network error, timeout, or a non-HTTP throw). Pages use this when a specific
+ * status changes the UI rather than just the message — e.g. 404 renders a
+ * "not found" state instead of an error banner.
+ *
+ * Exists so feature components don't import axios themselves just to narrow the
+ * error type; this module is the only place that should know the HTTP client.
+ */
+export function getErrorStatus(err: unknown): number | undefined {
+  return axios.isAxiosError(err) ? err.response?.status : undefined;
+}

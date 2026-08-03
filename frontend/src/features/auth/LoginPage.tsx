@@ -1,7 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
-import axios from 'axios';
-import { getErrorMessage } from '../../api/client';
+import { getErrorMessage, getErrorStatus } from '../../api/client';
 import { resendVerificationEmail } from '../../api/auth';
 import { useAuth } from '../../auth/AuthContext';
 import { Card } from '../../components/Card';
@@ -42,7 +41,7 @@ export function LoginPage() {
       // Forward the state so AddToTripButton can resume the pending add.
       navigate(from, { replace: true, state: location.state });
     } catch (err) {
-      if (axios.isAxiosError(err) && err.response?.status === 403) {
+      if (getErrorStatus(err) === 403) {
         setUnverified(true);
       }
       setError(getErrorMessage(err, 'Login failed.'));

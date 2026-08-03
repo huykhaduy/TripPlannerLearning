@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import axios from 'axios';
+import { getErrorStatus } from '../../api/client';
 import { getDestinationDetails } from '../../api/destinations';
 import { AddToTripButton } from './AddToTripButton';
 import { Card } from '../../components/Card';
@@ -126,7 +126,7 @@ export function DestinationDetailsPage() {
       })
       .catch((err) => {
         if (ignore) return;
-        const notFound = axios.isAxiosError(err) && err.response?.status === 404;
+        const notFound = getErrorStatus(err) === 404;
         setError(notFound ? 'Destination not found.' : 'Could not load this destination. Please try again.');
       });
 

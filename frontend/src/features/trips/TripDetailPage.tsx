@@ -1,7 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import axios from 'axios';
-import { getErrorMessage } from '../../api/client';
+import { getErrorMessage, getErrorStatus } from '../../api/client';
 import { getTrip, removeDestination, updateItineraryItem, updateTrip } from '../../api/trips';
 import { Card } from '../../components/Card';
 import { Field, fieldControlClass } from '../../components/Field';
@@ -187,7 +186,7 @@ export function TripDetailPage() {
       })
       .catch((err) => {
         if (ignore) return;
-        const notFound = axios.isAxiosError(err) && err.response?.status === 404;
+        const notFound = getErrorStatus(err) === 404;
         setLoadError(notFound ? 'Trip not found.' : 'Could not load the trip. Please try again.');
       });
     return () => {
