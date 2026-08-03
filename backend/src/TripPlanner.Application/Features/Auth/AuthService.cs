@@ -18,8 +18,7 @@ namespace TripPlanner.Application.Features.Auth;
 /// shape every other use-case in this project should follow:
 ///
 ///   * depend on INTERFACES from the Application layer (IUserRepository,
-///     IUnitOfWork, IPasswordHasher, IJwtTokenGenerator) — never on
-///     EF/Infrastructure types;
+///     IPasswordHasher, IJwtTokenGenerator) — never on EF/Infrastructure types;
 ///   * validate input and enforce business rules, throwing the Application
 ///     exceptions (Validation/Conflict/Unauthorized) that the API maps to HTTP;
 ///   * map entities to DTOs so we never leak the password hash to the client.
@@ -29,7 +28,6 @@ namespace TripPlanner.Application.Features.Auth;
 public class AuthService : IAuthService
 {
     private readonly IUserRepository _users;
-    private readonly IUnitOfWork _unitOfWork;
     private readonly IPasswordHasher _passwordHasher;
     private readonly IJwtTokenGenerator _tokenGenerator;
     private readonly IEmailSender _emailSender;
@@ -40,7 +38,6 @@ public class AuthService : IAuthService
 
     public AuthService(
         IUserRepository users,
-        IUnitOfWork unitOfWork,
         IPasswordHasher passwordHasher,
         IJwtTokenGenerator tokenGenerator,
         IEmailSender emailSender,
@@ -50,7 +47,6 @@ public class AuthService : IAuthService
         IValidator<LoginRequest> loginValidator)
     {
         _users = users;
-        _unitOfWork = unitOfWork;
         _passwordHasher = passwordHasher;
         _tokenGenerator = tokenGenerator;
         _emailSender = emailSender;
@@ -85,8 +81,7 @@ public class AuthService : IAuthService
             IsEmailVerified = false, // F4/US2 — flipped by VerifyEmailAsync once the emailed link is opened.
         };
 
-        _users.Add(user);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        await _users.AddAsync(user, cancellationToken);
 
         // Registration still succeeds even if the email itself can't be sent
         // (SMTP down/misconfigured) — the user can retry via "resend
@@ -109,7 +104,7 @@ public class AuthService : IAuthService
         if (!user.IsEmailVerified)
         {
             user.IsEmailVerified = true;
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            await _users.UpdateAsync(user, cancellationToken);
         }
     }
 

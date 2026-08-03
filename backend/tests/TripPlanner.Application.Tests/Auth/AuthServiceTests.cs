@@ -30,7 +30,6 @@ public class AuthServiceTests
     private static AuthService CreateSut(ApplicationDbContext db, Mock<IEmailSender>? emailSender = null)
     {
         var users = new UserRepository(db);
-        var unitOfWork = new UnitOfWork(db);
 
         // Real BCrypt hasher (cheap enough for tests); fake token generator.
         var hasher = new BCryptPasswordHasher();
@@ -58,7 +57,7 @@ public class AuthServiceTests
 
         // Real validators — pure logic, so mocking them would only hide bugs.
         return new AuthService(
-            users, unitOfWork, hasher, tokenGenerator.Object, email.Object, appUrls.Object,
+            users, hasher, tokenGenerator.Object, email.Object, appUrls.Object,
             new RegisterRequestValidator(), new ResendVerificationRequestValidator(),
             new LoginRequestValidator());
     }
