@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using TripPlanner.Application.Common.Interfaces;
 using TripPlanner.Infrastructure.Caching;
 using TripPlanner.Infrastructure.Email;
@@ -112,7 +113,7 @@ public static class DependencyInjection
         {
             var real = (IDistributedCache)(registration.ImplementationFactory?.Invoke(sp)
                 ?? ActivatorUtilities.CreateInstance(sp, registration.ImplementationType!));
-            return new ResilientDistributedCache(real);
+            return new ResilientDistributedCache(real, sp.GetRequiredService<ILogger<ResilientDistributedCache>>());
         });
     }
 }

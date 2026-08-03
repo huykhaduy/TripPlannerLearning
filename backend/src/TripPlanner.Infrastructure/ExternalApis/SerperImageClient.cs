@@ -1,5 +1,7 @@
 using System.Net.Http.Json;
+using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using TripPlanner.Application.Common.Interfaces;
 
@@ -10,16 +12,22 @@ namespace TripPlanner.Infrastructure.ExternalApis;
 /// (https://serper.dev/, base address https://google.serper.dev/, configured
 /// in DependencyInjection). Each call spends one paid credit, so callers
 /// should cache results rather than re-query for the same term.
+///
+/// Transient failures are logged here and then RETHROWN, not swallowed:
+/// DestinationService distinguishes "the search failed" from "the search found
+/// nothing" when deciding whether to cache the result, so it must still see them.
 /// </summary>
 public class SerperImageClient : IImageSearchProvider
 {
     private readonly HttpClient _httpClient;
     private readonly SerperSettings _settings;
+    private readonly ILogger<SerperImageClient> _logger;
 
-    public SerperImageClient(HttpClient httpClient, IOptions<SerperSettings> settings)
+    public SerperImageClient(HttpClient httpClient, IOptions<SerperSettings> settings, ILogger<SerperImageClient> logger)
     {
         _httpClient = httpClient;
         _settings = settings.Value;
+        _logger = logger;
     }
 
     public async Task<string?> SearchImageAsync(string query, CancellationToken cancellationToken = default) =>
@@ -41,10 +49,20 @@ public class SerperImageClient : IImageSearchProvider
         };
         request.Headers.Add("X-API-KEY", _settings.ApiKey);
 
-        using var response = await _httpClient.SendAsync(request, cancellationToken);
-        response.EnsureSuccessStatusCode();
+        ImageSearchResponse? payload;
+        try
+        {
+            using var response = await _httpClient.SendAsync(request, cancellationToken);
+            response.EnsureSuccessStatusCode();
 
-        var payload = await response.Content.ReadFromJsonAsync<ImageSearchResponse>(cancellationToken);
+            payload = await response.Content.ReadFromJsonAsync<ImageSearchResponse>(cancellationToken);
+        }
+        catch (Exception ex) when (IsTransientFailure(ex) && !cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "Serper image search failed for {Query}.", query);
+            throw;
+        }
+
         if (payload?.Images is null)
         {
             return [];
@@ -60,6 +78,13 @@ public class SerperImageClient : IImageSearchProvider
             .Cast<string>()
             .ToList();
     }
+
+    /// <summary>
+    /// Connection failures, HttpClient timeouts (surfaced as TaskCanceledException,
+    /// not HttpRequestException), and an unparseable response body.
+    /// </summary>
+    private static bool IsTransientFailure(Exception ex) =>
+        ex is HttpRequestException or TaskCanceledException or JsonException;
 
     private sealed record ImageSearchResponse(
         [property: JsonPropertyName("images")] List<ImageResult>? Images);

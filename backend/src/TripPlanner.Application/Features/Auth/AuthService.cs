@@ -145,8 +145,10 @@ public class AuthService : IAuthService
         }
         catch (Exception ex) when (IsTransientEmailFailure(ex) && !cancellationToken.IsCancellationRequested)
         {
-            // SMTP down, misconfigured, or the recipient was rejected — the
-            // account still exists; resending is a separate, retryable step.
+            // F4/US1: the account still exists and resending is a separate,
+            // retryable step, so a mail outage must not fail registration.
+            // Already logged by the IEmailSender implementation — swallowing the
+            // exception here loses no diagnostic information.
         }
     }
 

@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using TripPlanner.Application.Common.Interfaces;
 using TripPlanner.Application.Features.Destinations.Dtos;
@@ -50,12 +51,34 @@ public class GeoapifyClient : IDestinationProvider
 
     private readonly HttpClient _httpClient;
     private readonly GeoapifySettings _settings;
+    private readonly ILogger<GeoapifyClient> _logger;
 
-    public GeoapifyClient(HttpClient httpClient, IOptions<GeoapifySettings> settings)
+    public GeoapifyClient(HttpClient httpClient, IOptions<GeoapifySettings> settings, ILogger<GeoapifyClient> logger)
     {
         _httpClient = httpClient;
         _settings = settings.Value;
+        _logger = logger;
     }
+
+    /// <summary>
+    /// Logs a transient failure and rethrows — the caller decides the fallback
+    /// (DestinationService serves a stale cache entry when it has one).
+    ///
+    /// This has to be explicit rather than relying on HttpClientFactory's built-in
+    /// request logging, because <c>AddInfrastructure</c> calls RemoveAllLoggers()
+    /// on this client: Geoapify takes its apiKey as a query-string parameter, and
+    /// the default handlers log the full request URI. Without this method a
+    /// Geoapify outage is completely invisible.
+    /// </summary>
+    private void LogTransientFailure(Exception ex, string operation) =>
+        _logger.LogWarning(ex, "Geoapify {Operation} failed.", operation);
+
+    /// <summary>
+    /// Connection failures, HttpClient timeouts (surfaced as TaskCanceledException,
+    /// not HttpRequestException), and an unparseable response body.
+    /// </summary>
+    private static bool IsTransientFailure(Exception ex) =>
+        ex is HttpRequestException or TaskCanceledException or JsonException;
 
     public async Task<IReadOnlyList<LocationSuggestionDto>> SearchLocationsAsync(string query, CancellationToken cancellationToken = default)
     {
@@ -64,10 +87,20 @@ public class GeoapifyClient : IDestinationProvider
         // filter below discards streets/districts; the service caps at 5.
         var url = $"v1/geocode/autocomplete?text={Uri.EscapeDataString(query)}&limit=10&apiKey={_settings.ApiKey}";
 
-        using var response = await _httpClient.GetAsync(url, cancellationToken);
-        response.EnsureSuccessStatusCode();
+        GeocodeResponse? payload;
+        try
+        {
+            using var response = await _httpClient.GetAsync(url, cancellationToken);
+            response.EnsureSuccessStatusCode();
 
-        var payload = await response.Content.ReadFromJsonAsync<GeocodeResponse>(JsonOptions, cancellationToken);
+            payload = await response.Content.ReadFromJsonAsync<GeocodeResponse>(JsonOptions, cancellationToken);
+        }
+        catch (Exception ex) when (IsTransientFailure(ex) && !cancellationToken.IsCancellationRequested)
+        {
+            LogTransientFailure(ex, "location search");
+            throw;
+        }
+
         if (payload?.Features is null)
         {
             return [];
@@ -92,12 +125,22 @@ public class GeoapifyClient : IDestinationProvider
         var url = FormattableString.Invariant(
             $"v2/places?categories={AttractionCategories}&filter=circle:{longitude},{latitude},{radiusMeters}&limit=20&apiKey={_settings.ApiKey}");
 
-        using var response = await _httpClient.GetAsync(url, cancellationToken);
-        response.EnsureSuccessStatusCode();
+        PlacesResponse? payload;
+        try
+        {
+            using var response = await _httpClient.GetAsync(url, cancellationToken);
+            response.EnsureSuccessStatusCode();
 
-        // Same GeoJSON FeatureCollection shape as place-details, so the wire
-        // records are shared.
-        var payload = await response.Content.ReadFromJsonAsync<PlacesResponse>(JsonOptions, cancellationToken);
+            // Same GeoJSON FeatureCollection shape as place-details, so the wire
+            // records are shared.
+            payload = await response.Content.ReadFromJsonAsync<PlacesResponse>(JsonOptions, cancellationToken);
+        }
+        catch (Exception ex) when (IsTransientFailure(ex) && !cancellationToken.IsCancellationRequested)
+        {
+            LogTransientFailure(ex, "attractions lookup");
+            throw;
+        }
+
         if (payload?.Features is null)
         {
             return [];
@@ -120,18 +163,28 @@ public class GeoapifyClient : IDestinationProvider
     {
         var url = $"v2/place-details?id={Uri.EscapeDataString(providerId)}&apiKey={_settings.ApiKey}";
 
-        using var response = await _httpClient.GetAsync(url, cancellationToken);
-
-        // Geoapify answers 400/404 for ids it does not recognise — for us that
-        // simply means "no such destination", which the contract expresses as null.
-        if (response.StatusCode is HttpStatusCode.BadRequest or HttpStatusCode.NotFound)
+        PlacesResponse? payload;
+        try
         {
-            return null;
+            using var response = await _httpClient.GetAsync(url, cancellationToken);
+
+            // Geoapify answers 400/404 for ids it does not recognise — for us that
+            // simply means "no such destination", which the contract expresses as null.
+            if (response.StatusCode is HttpStatusCode.BadRequest or HttpStatusCode.NotFound)
+            {
+                return null;
+            }
+
+            response.EnsureSuccessStatusCode(); // anything else (401, 5xx) is a real fault
+
+            payload = await response.Content.ReadFromJsonAsync<PlacesResponse>(JsonOptions, cancellationToken);
+        }
+        catch (Exception ex) when (IsTransientFailure(ex) && !cancellationToken.IsCancellationRequested)
+        {
+            LogTransientFailure(ex, "place details");
+            throw;
         }
 
-        response.EnsureSuccessStatusCode(); // anything else (401, 5xx) is a real fault
-
-        var payload = await response.Content.ReadFromJsonAsync<PlacesResponse>(JsonOptions, cancellationToken);
         var place = payload?.Features?.FirstOrDefault()?.Properties;
         if (place is null)
         {
