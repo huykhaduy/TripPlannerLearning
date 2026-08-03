@@ -87,9 +87,47 @@ WebApi ──▶ Application ──▶ Domain
   | `NotFoundException` | 404 |
   | `ConflictException` | 409 |
   | `NotImplementedException` | 501 |
+- **Validation**: every feature method starts by running its FluentValidation validator via
+  `ValidateAndThrowAppExceptionAsync` (`Common/Validation/ValidationExtensions.cs`), which turns
+  failures into our `ValidationException` → HTTP 400 with field-level `errors`. Validators are
+  **not registered in DI and must not be** — `AddApplication()` deliberately has no
+  `AddValidatorsFromAssembly` call, and the package is core `FluentValidation`, not
+  `FluentValidation.DependencyInjectionExtensions`. Each service holds them as
+  `private static readonly` instances (see `AuthService`), because they are stateless,
+  dependency-free rule declarations: injecting `IValidator<T>` would be ten interfaces with one
+  implementation each that nothing ever substitutes. The one thing that reverses this: a validator
+  needing a dependency (e.g. an async rule hitting the database) can no longer be a static
+  instance — convert *that* validator to a constructor parameter and leave the rest alone.
+- **Logging**: adapters log at the source, then **rethrow**; callers keep their own fallback
+  policy. `GeoapifyClient`, `SerperImageClient`, `SmtpEmailSender` and `ResilientDistributedCache`
+  each catch their transient failures, log a Warning, and let the exception continue (the cache
+  decorator is the exception — degrading to a miss *is* its contract, so it swallows after
+  logging). Do not make an adapter swallow to "simplify" a caller: `DestinationService` decides
+  whether to cache a result based on whether the search *failed* versus *found nothing*, and
+  `AuthService`'s "registration survives a mail outage" guarantee (F4/US1) is asserted by a test
+  at the Application level. `DestinationService` holds the only `ILogger` in Application, for the
+  one failure that originates in this layer rather than an adapter: a cached entry that no longer
+  matches its DTO shape.
 - **Reference slice**: `AuthService.cs` + `AuthController.cs` are the canonical worked example. Study them before implementing other features.
 - **Destination caching**: `Destination` rows are a cache of external-provider data (Geoapify), keyed by a unique index on `ProviderId` (`DestinationConfiguration.cs`). `DestinationService` (search/details) never persists rows — only `TripService.AddDestinationAsync` upserts one, on first add to any trip. Do not reintroduce a "must already exist" lookup there; a fresh `ProviderId` is expected and should upsert, not 404.
-- **Concurrency via unique index + catch/retry**: this codebase enforces invariants that matter under concurrent requests as DB-level unique indexes (`User.Email`, `Destination.ProviderId`, `(ItineraryDayId, DestinationId)`) rather than app-level locking. `ApplicationDbContext.SaveChangesAsync` translates a Postgres unique violation into `ConcurrencyException`, so read-then-write code catches that (never EF's `DbUpdateException`) and re-fetches — see `TripService.GetOrCreateDestinationAsync` and `DestinationRepository.AddAsync`. EF Core's InMemory provider (used in tests) does **not** enforce these indexes, so this path is untested by `dotnet test` and must be reasoned about directly against the SQL provider. `ItineraryItem.SortOrder` is *not* a DB-level unique index — ordering is enforced purely in-memory via dense resequencing per request (`TripService.Resequence`), so two concurrent reorders of the same day/bucket race without a DB-level guard; this is a known gap, not an oversight.
+- **Entities supply their own keys**: `BaseEntity` self-assigns `Id = Guid.NewGuid()`, so all five
+  entity configurations declare `builder.Property(x => x.Id).ValueGeneratedNever()`. Without it, EF's
+  convention treats a Guid key as store-generated and classifies a *new* child arriving with a key
+  already set as an EXISTING row — issuing an UPDATE instead of an INSERT, which surfaces as
+  `DbUpdateConcurrencyException: Attempted to update or delete an entity that does not exist`. This
+  is what lets `TripService` just do `trip.Days.Add(...)` / `trip.Items.Add(...)` and rely on one
+  `UpdateAsync`. The `SetIdValueGeneratedNever` migration is intentionally **empty** and must not be
+  deleted: it carries the metadata change into `ApplicationDbContextModelSnapshot`, which later
+  migrations diff against.
+- **Concurrency via unique index + catch/retry**: this codebase enforces invariants that matter under concurrent requests as DB-level unique indexes (`User.Email`, `Destination.ProviderId`, `(ItineraryDayId, DestinationId)`) rather than app-level locking. `ApplicationDbContext.SaveChangesAsync` translates a Postgres unique violation into `ConcurrencyException`, so read-then-write code catches that (never EF's `DbUpdateException`) and re-fetches or re-reports — all three indexes have a handler: `AuthService.RegisterAsync` (→ the same generic 409 as the in-memory duplicate check, so the two can't be told apart), `TripService.GetOrCreateDestinationAsync`, and `TripService.SaveWithDuplicateGuardAsync`. `DestinationRepository.AddAsync` detaches its losing entity before rethrowing so the caller can re-fetch on a clean change tracker. EF Core's InMemory provider (used in tests) does **not** enforce these indexes, so the translation itself is untested by `dotnet test` and must be reasoned about directly against the SQL provider; the *callers* are tested by simulating `ConcurrencyException` at the repository boundary with a mock (see `AuthServiceTests`).
+- **Two accepted concurrency gaps**, both decisions rather than oversights. Postgres treats every
+  NULL as distinct, so `(ItineraryDayId, DestinationId)` does **not** cover Saved Places rows
+  (`ItineraryDayId IS NULL`) — two concurrent adds of the same place to one trip's Saved Places can
+  both succeed. A filtered unique index for it was written and then deliberately reverted as
+  over-engineering for this project; `TripService`'s in-memory check is the only guard, and the
+  exposure is one duplicate row in a user's own trip. Separately, `ItineraryItem.SortOrder` has no
+  unique index — ordering is enforced purely in-memory via dense resequencing per request
+  (`TripService.Resequence`), so two concurrent reorders of the same bucket race.
 
 ### Feature layout (backend)
 
@@ -116,9 +154,13 @@ src/
 ```
 
 HTTP client (`src/api/client.ts`) is a configured Axios instance whose JWT interceptor
-attaches `Authorization: Bearer <token>` when present, and exposes `getErrorMessage(err,
-fallback)` — the shared helper every feature page uses to turn a caught error into the
-backend's `ProblemDetails.detail` (or a fallback string). `destinations.ts` and `trips.ts`
+attaches `Authorization: Bearer <token>` when present, and exposes two shared error helpers:
+`getErrorMessage(err, fallback)` for the backend's `ProblemDetails.detail`, and
+`getErrorStatus(err)` for the HTTP status when a *specific* code changes the UI rather than just
+the message (e.g. 404 → render a "not found" state). **`src/api/` is the only place allowed to
+import `axios`** — components call these helpers instead of narrowing the error type themselves,
+so the HTTP library stays swappable and out of the presentation layer.
+`destinations.ts` and `trips.ts`
 follow `auth.ts`'s pattern: thin typed wrappers over `apiClient`, no raw `fetch`/`axios`
 calls in components. `types.ts` covers `User`/`AuthResponse` plus every destination/trip
 DTO consumed by the feature pages — add new shared shapes here rather than declaring
@@ -135,13 +177,38 @@ private static ApplicationDbContext CreateDb() =>
         .Options);
 ```
 
-Arrange with a fresh `CreateDb()`, construct the service under test with real implementations where cheap (e.g. `BCryptPasswordHasher`) and `Mock<T>` for everything else.
+Arrange with a fresh `CreateDb()`, construct the service under test with real implementations where cheap (e.g. `BCryptPasswordHasher`) and `Mock<T>` for everything else. Services take no validator
+arguments (they hold their own), and anything needing an `ILogger` gets
+`NullLogger<T>.Instance`.
+
+`*ValidatorTests` (one per feature) test the validators directly with FluentValidation's
+`TestValidate` helper. They exist for what the service tests don't check: which **property**
+carries the error, the exact **message** (several are deliberately identical so they can't be used
+to probe whether an account exists), and the **boundary** either side of each limit. Three of them
+pin deliberate *absences* — `Login_WithAPasswordShorterThanRegisterAllows_IsStillValid` (adding a
+length rule to login would lock out accounts whose passwords predate a policy change),
+`UpdateTrip_WithEndBeforeStart_IsNotTheValidatorsJob` (that's `Trip.SetDates`, a domain rule), and
+`UpdateItem_WithAPositionPastTheEndOfTheBucket_IsValid` (`TripService` clamps, so "99" means
+"last"). Watch the trip-length rule: it compares a *difference* of day numbers with a strict `<`,
+so the largest accepted range is `MaxTripLengthDays - 1` days apart, i.e. 365 days counted
+inclusively.
+
+`ApplicationDbContextTests` covers the `SaveChangesAsync` override's audit stamping — the
+unique-violation translation in the same method is not reachable under InMemory.
 
 `TripPlanner.WebApi.Tests` covers what the above can't: real HTTP routing, `[Authorize]`
-enforcement, and `ExceptionHandlingMiddleware`'s exception-to-status-code mapping. Uses
+enforcement, query-string binding, and `ExceptionHandlingMiddleware`'s exception-to-status-code
+mapping. Uses
 `WebApplicationFactory<Program>` against the real `Program` (see `CustomWebApplicationFactory.cs`),
 with `ApplicationDbContext` swapped from Npgsql to a fresh EF Core InMemory database per
-factory instance. Two things to know before touching it:
+factory instance. External providers are replaced by `FakeExternalProviders.cs`, whose
+`FakeDestinationProvider` answers **every** id with a hit *except* ids prefixed
+`FakeDestinationProvider.UnknownIdPrefix` (`"unknown-"`) — that prefix is the only way to reach the
+"unknown to the provider AND absent from the database" 404 branch. `DestinationsEndpointsTests`
+also pins that the destinations endpoints stay **public** (no `[Authorize]`, F3/US8): a stray
+attribute there would break anonymous browsing and nothing else in the suite would notice.
+
+Two things to know before touching the factory:
 
 - `AddDbContext`'s `optionsLifetime` defaults to **Scoped**, not Singleton — the InMemory
   database name must be generated *once* and captured (a field), never inlined as
