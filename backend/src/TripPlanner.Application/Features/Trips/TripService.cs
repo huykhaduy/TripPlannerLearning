@@ -1,10 +1,10 @@
 using System.Text.Json;
-using FluentValidation;
 using TripPlanner.Application.Common.Exceptions;
 using TripPlanner.Application.Common.Interfaces;
 using TripPlanner.Application.Common.Validation;
 using TripPlanner.Application.Features.Destinations;
 using TripPlanner.Application.Features.Trips.Dtos;
+using TripPlanner.Application.Features.Trips.Validators;
 using TripPlanner.Domain.Entities;
 using ValidationException = TripPlanner.Application.Common.Exceptions.ValidationException;
 
@@ -28,36 +28,31 @@ public class TripService : ITripService
     /// </summary>
     private const string DuplicateDestinationMessage = "This destination is already in that part of the trip.";
 
+    // Stateless rule declarations with no dependencies — shared instances rather than
+    // constructor parameters. See AuthService for the reasoning.
+    private static readonly CreateTripRequestValidator CreateTripValidator = new();
+    private static readonly UpdateTripRequestValidator UpdateTripValidator = new();
+    private static readonly AddDestinationRequestValidator AddDestinationValidator = new();
+    private static readonly UpdateItineraryItemRequestValidator UpdateItemValidator = new();
+
     private readonly ITripRepository _trips;
     private readonly IDestinationRepository _destinations;
     private readonly ICurrentUserService _currentUser;
     private readonly IDestinationProvider _destinationProvider;
     private readonly IImageSearchProvider _imageSearch;
-    private readonly IValidator<CreateTripRequest> _createTripValidator;
-    private readonly IValidator<UpdateTripRequest> _updateTripValidator;
-    private readonly IValidator<AddDestinationRequest> _addDestinationValidator;
-    private readonly IValidator<UpdateItineraryItemRequest> _updateItemValidator;
 
     public TripService(
         ITripRepository trips,
         IDestinationRepository destinations,
         ICurrentUserService currentUser,
         IDestinationProvider destinationProvider,
-        IImageSearchProvider imageSearch,
-        IValidator<CreateTripRequest> createTripValidator,
-        IValidator<UpdateTripRequest> updateTripValidator,
-        IValidator<AddDestinationRequest> addDestinationValidator,
-        IValidator<UpdateItineraryItemRequest> updateItemValidator)
+        IImageSearchProvider imageSearch)
     {
         _trips = trips;
         _destinations = destinations;
         _currentUser = currentUser;
         _destinationProvider = destinationProvider;
         _imageSearch = imageSearch;
-        _createTripValidator = createTripValidator;
-        _updateTripValidator = updateTripValidator;
-        _addDestinationValidator = addDestinationValidator;
-        _updateItemValidator = updateItemValidator;
     }
 
     public async Task<IReadOnlyList<TripSummaryDto>> GetMyTripsAsync(CancellationToken cancellationToken = default)
@@ -89,7 +84,7 @@ public class TripService : ITripService
     public async Task<TripSummaryDto> CreateTripAsync(CreateTripRequest request, CancellationToken cancellationToken = default)
     {
         // F3/US1 — name is required (CreateTripRequestValidator -> HTTP 400).
-        await _createTripValidator.ValidateAndThrowAppExceptionAsync(request, cancellationToken);
+        await CreateTripValidator.ValidateAndThrowAppExceptionAsync(request, cancellationToken);
 
         var trip = new Trip
         {
@@ -105,7 +100,7 @@ public class TripService : ITripService
 
     public async Task<TripDetailDto> UpdateTripAsync(Guid tripId, UpdateTripRequest request, CancellationToken cancellationToken = default)
     {
-        await _updateTripValidator.ValidateAndThrowAppExceptionAsync(request, cancellationToken);
+        await UpdateTripValidator.ValidateAndThrowAppExceptionAsync(request, cancellationToken);
 
         var userId = _currentUser.GetRequiredUserId();
 
@@ -169,7 +164,7 @@ public class TripService : ITripService
 
     public async Task<TripDestinationDto> AddDestinationAsync(Guid tripId, AddDestinationRequest request, CancellationToken cancellationToken = default)
     {
-        await _addDestinationValidator.ValidateAndThrowAppExceptionAsync(request, cancellationToken);
+        await AddDestinationValidator.ValidateAndThrowAppExceptionAsync(request, cancellationToken);
 
         var userId = _currentUser.GetRequiredUserId();
 
@@ -201,7 +196,7 @@ public class TripService : ITripService
 
     public async Task<TripDestinationDto> UpdateItineraryItemAsync(Guid tripId, Guid itemId, UpdateItineraryItemRequest request, CancellationToken cancellationToken = default)
     {
-        await _updateItemValidator.ValidateAndThrowAppExceptionAsync(request, cancellationToken);
+        await UpdateItemValidator.ValidateAndThrowAppExceptionAsync(request, cancellationToken);
 
         var userId = _currentUser.GetRequiredUserId();
 

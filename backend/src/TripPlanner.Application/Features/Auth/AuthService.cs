@@ -1,10 +1,10 @@
 using System.Net.Mail;
 using System.Net.Sockets;
-using FluentValidation;
 using TripPlanner.Application.Common.Exceptions;
 using TripPlanner.Application.Common.Interfaces;
 using TripPlanner.Application.Common.Validation;
 using TripPlanner.Application.Features.Auth.Dtos;
+using TripPlanner.Application.Features.Auth.Validators;
 using TripPlanner.Domain.Entities;
 using ValidationException = TripPlanner.Application.Common.Exceptions.ValidationException;
 
@@ -35,40 +35,40 @@ public class AuthService : IAuthService
     /// </summary>
     private const string RegistrationRejectedMessage = "Unable to register with the provided details.";
 
+    // Validators are stateless rule declarations with no dependencies of their own, so
+    // they are shared instances rather than constructor parameters. Injecting
+    // IValidator<T> would mean an interface with exactly one implementation that
+    // nothing ever substitutes — the tests construct these same classes directly.
+    // FluentValidation validators are safe to reuse concurrently once built.
+    private static readonly RegisterRequestValidator RegisterValidator = new();
+    private static readonly ResendVerificationRequestValidator ResendValidator = new();
+    private static readonly LoginRequestValidator LoginValidator = new();
+
     private readonly IUserRepository _users;
     private readonly IPasswordHasher _passwordHasher;
     private readonly IJwtTokenGenerator _tokenGenerator;
     private readonly IEmailSender _emailSender;
     private readonly IAppUrlProvider _appUrls;
-    private readonly IValidator<RegisterRequest> _registerValidator;
-    private readonly IValidator<ResendVerificationRequest> _resendValidator;
-    private readonly IValidator<LoginRequest> _loginValidator;
 
     public AuthService(
         IUserRepository users,
         IPasswordHasher passwordHasher,
         IJwtTokenGenerator tokenGenerator,
         IEmailSender emailSender,
-        IAppUrlProvider appUrls,
-        IValidator<RegisterRequest> registerValidator,
-        IValidator<ResendVerificationRequest> resendValidator,
-        IValidator<LoginRequest> loginValidator)
+        IAppUrlProvider appUrls)
     {
         _users = users;
         _passwordHasher = passwordHasher;
         _tokenGenerator = tokenGenerator;
         _emailSender = emailSender;
         _appUrls = appUrls;
-        _registerValidator = registerValidator;
-        _resendValidator = resendValidator;
-        _loginValidator = loginValidator;
     }
 
     public async Task<UserDto> RegisterAsync(RegisterRequest request, CancellationToken cancellationToken = default)
     {
         // Input rules live in RegisterRequestValidator (Feature 4 / US1);
         // failures surface as our ValidationException -> HTTP 400.
-        await _registerValidator.ValidateAndThrowAppExceptionAsync(request, cancellationToken);
+        await RegisterValidator.ValidateAndThrowAppExceptionAsync(request, cancellationToken);
 
         var email = NormalizeEmail(request.Email);
 
@@ -127,7 +127,7 @@ public class AuthService : IAuthService
 
     public async Task ResendVerificationEmailAsync(ResendVerificationRequest request, CancellationToken cancellationToken = default)
     {
-        await _resendValidator.ValidateAndThrowAppExceptionAsync(request, cancellationToken);
+        await ResendValidator.ValidateAndThrowAppExceptionAsync(request, cancellationToken);
 
         var user = await _users.GetByEmailAsync(NormalizeEmail(request.Email), cancellationToken);
 
@@ -177,7 +177,7 @@ public class AuthService : IAuthService
         // Presence only — LoginRequestValidator explains why login deliberately
         // does not re-apply the registration password policy. Without this, a
         // null email reached NormalizeEmail below and 500'd instead of 400'd.
-        await _loginValidator.ValidateAndThrowAppExceptionAsync(request, cancellationToken);
+        await LoginValidator.ValidateAndThrowAppExceptionAsync(request, cancellationToken);
 
         var email = NormalizeEmail(request.Email);
 

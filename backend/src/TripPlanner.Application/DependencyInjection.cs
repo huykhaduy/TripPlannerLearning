@@ -18,8 +18,9 @@ public static class DependencyInjection
         services.AddScoped<ITripService, TripService>();
         services.AddScoped<IDestinationService, DestinationService>();
 
-        // Registers every AbstractValidator<T> in this assembly as IValidator<T>.
-        services.AddValidatorsFromAssembly(typeof(DependencyInjection).Assembly);
+        // Validators are NOT registered: they are stateless, dependency-free rule
+        // declarations, so each service holds its own shared instances instead of
+        // taking an IValidator<T> per request type. See AuthService for the reasoning.
 
         // Wall clock as a dependency so cache-freshness logic is testable
         // (tests substitute a fake TimeProvider and fast-forward time).

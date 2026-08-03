@@ -60,11 +60,9 @@ public class AuthServiceTests
         var appUrls = new Mock<IAppUrlProvider>();
         appUrls.Setup(p => p.FrontendBaseUrl).Returns("http://localhost:5173");
 
-        // Real validators — pure logic, so mocking them would only hide bugs.
-        return new AuthService(
-            users, hasher, tokenGenerator.Object, email.Object, appUrls.Object,
-            new RegisterRequestValidator(), new ResendVerificationRequestValidator(),
-            new LoginRequestValidator());
+        // Validators are not injected — AuthService holds its own shared instances,
+        // so the real rules always run here.
+        return new AuthService(users, hasher, tokenGenerator.Object, email.Object, appUrls.Object);
     }
 
     [Fact]

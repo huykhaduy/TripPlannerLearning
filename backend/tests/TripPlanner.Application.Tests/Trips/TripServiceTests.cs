@@ -41,9 +41,7 @@ public class TripServiceTests
             new DestinationRepository(db),
             currentUser.Object,
             provider ?? Mock.Of<IDestinationProvider>(),
-            (imageSearch ?? NoOpImageSearch()).Object,
-            new CreateTripRequestValidator(), new UpdateTripRequestValidator(),
-            new AddDestinationRequestValidator(), new UpdateItineraryItemRequestValidator());
+            (imageSearch ?? NoOpImageSearch()).Object);
     }
 
     /// <summary>Provider stub that knows one place; returns null for anything else.</summary>

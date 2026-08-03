@@ -1,11 +1,11 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
-using FluentValidation;
 using Microsoft.Extensions.Caching.Distributed;
 using TripPlanner.Application.Common.Exceptions;
 using TripPlanner.Application.Common.Interfaces;
 using TripPlanner.Application.Common.Validation;
 using TripPlanner.Application.Features.Destinations.Dtos;
+using TripPlanner.Application.Features.Destinations.Validators;
 using TripPlanner.Domain.Entities;
 
 namespace TripPlanner.Application.Features.Destinations;
@@ -49,33 +49,30 @@ public class DestinationService : IDestinationService
     // retention window bounds memory growth.
     private static readonly TimeSpan CacheRetention = TimeSpan.FromDays(7);
 
+    // Stateless rule declarations with no dependencies — shared instances rather than
+    // constructor parameters. See AuthService for the reasoning.
+    private static readonly SearchLocationsRequestValidator SearchValidator = new();
+    private static readonly GetAttractionsRequestValidator AttractionsValidator = new();
+    private static readonly GetDestinationDetailsRequestValidator DetailsValidator = new();
+
     private readonly IDestinationRepository _destinations;
     private readonly IDestinationProvider _provider;
     private readonly IImageSearchProvider _imageSearch;
     private readonly IDistributedCache _cache;
     private readonly TimeProvider _clock;
-    private readonly IValidator<SearchLocationsRequest> _searchValidator;
-    private readonly IValidator<GetAttractionsRequest> _attractionsValidator;
-    private readonly IValidator<GetDestinationDetailsRequest> _detailsValidator;
 
     public DestinationService(
         IDestinationRepository destinations,
         IDestinationProvider provider,
         IImageSearchProvider imageSearch,
         IDistributedCache cache,
-        TimeProvider clock,
-        IValidator<SearchLocationsRequest> searchValidator,
-        IValidator<GetAttractionsRequest> attractionsValidator,
-        IValidator<GetDestinationDetailsRequest> detailsValidator)
+        TimeProvider clock)
     {
         _destinations = destinations;
         _provider = provider;
         _imageSearch = imageSearch;
         _cache = cache;
         _clock = clock;
-        _searchValidator = searchValidator;
-        _attractionsValidator = attractionsValidator;
-        _detailsValidator = detailsValidator;
     }
 
     /// <summary>
@@ -166,7 +163,7 @@ public class DestinationService : IDestinationService
         // F1/US1-US2 — the TRIMMED query must be ≥2 chars (spec §11.2), so
         // validate the same string we send to the provider, not the raw input.
         var trimmedQuery = query?.Trim() ?? string.Empty;
-        await _searchValidator.ValidateAndThrowAppExceptionAsync(new SearchLocationsRequest(trimmedQuery), cancellationToken);
+        await SearchValidator.ValidateAndThrowAppExceptionAsync(new SearchLocationsRequest(trimmedQuery), cancellationToken);
 
         // Key is the lowered query so "Paris" and "paris" share one entry. The
         // cached value is the POST-processed list — dedupe/rank/cap are
@@ -203,7 +200,7 @@ public class DestinationService : IDestinationService
     public async Task<IReadOnlyList<DestinationSummaryDto>> GetAttractionsAsync(double latitude, double longitude, double radiusKm, CancellationToken cancellationToken = default)
     {
         // F1/US3 — coordinates on the globe, 0 < radius ≤ 50 km (validator -> HTTP 400).
-        await _attractionsValidator.ValidateAndThrowAppExceptionAsync(
+        await AttractionsValidator.ValidateAndThrowAppExceptionAsync(
             new GetAttractionsRequest(latitude, longitude, radiusKm), cancellationToken);
 
         // Coordinates rounded to ~3 decimals (≈100 m) so near-identical map
@@ -373,7 +370,7 @@ public class DestinationService : IDestinationService
 
     public async Task<DestinationDetailsDto> GetDetailsAsync(string providerId, CancellationToken cancellationToken = default)
     {
-        await _detailsValidator.ValidateAndThrowAppExceptionAsync(
+        await DetailsValidator.ValidateAndThrowAppExceptionAsync(
             new GetDestinationDetailsRequest(providerId), cancellationToken);
 
         // F2/US1 (spec §11.3): the provider has the freshest data, but it can

@@ -84,9 +84,7 @@ public class DestinationServiceTests
         FakeClock? clock = null,
         Mock<IImageSearchProvider>? imageSearch = null) =>
         new(new DestinationRepository(db), provider.Object, (imageSearch ?? NoOpImageSearch()).Object,
-            new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions())), clock ?? new FakeClock(),
-            new SearchLocationsRequestValidator(), new GetAttractionsRequestValidator(),
-            new GetDestinationDetailsRequestValidator());
+            new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions())), clock ?? new FakeClock());
 
     /// <summary>Shorthand — coordinates don't matter for these tests.</summary>
     private static LocationSuggestionDto Suggestion(string name, string? country = null) =>
