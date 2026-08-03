@@ -6,9 +6,9 @@
 #
 # Redis:
 #   Optional — the in-process cache remains the zero-setup default.
-#   `docker compose up -d`, then in src/TripPlanner.WebApi/appsettings.Development.json set:
-#        "Cache": { "Provider": "Redis" }
-#      and use the "Redis" connection string already provided in .env.
+#   `docker compose up -d`, then in src/TripPlanner.WebApi/.env set:
+#        Cache__Provider=Redis
+#      and use the ConnectionStrings__Redis value already provided in .env.example.
 services:
   postgres:
     image: postgres:17
