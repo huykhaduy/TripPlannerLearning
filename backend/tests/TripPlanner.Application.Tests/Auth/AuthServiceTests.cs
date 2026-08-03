@@ -27,9 +27,14 @@ public class AuthServiceTests
             .UseInMemoryDatabase(databaseName: Guid.NewGuid().ToString())
             .Options);
 
-    private static AuthService CreateSut(ApplicationDbContext db, Mock<IEmailSender>? emailSender = null)
+    private static AuthService CreateSut(
+        ApplicationDbContext db,
+        Mock<IEmailSender>? emailSender = null,
+        IUserRepository? userRepository = null)
     {
-        var users = new UserRepository(db);
+        // Real repository by default; tests that need to simulate a persistence-level
+        // failure (e.g. a unique-index violation) pass their own.
+        var users = userRepository ?? new UserRepository(db);
 
         // Real BCrypt hasher (cheap enough for tests); fake token generator.
         var hasher = new BCryptPasswordHasher();
@@ -104,6 +109,36 @@ public class AuthServiceTests
 
         Assert.Equal("new@example.com", result.Email); // registration succeeds regardless
         Assert.Equal(1, await db.Users.CountAsync());
+    }
+
+    /// <summary>
+    /// F4/US1 — `User.Email` is a DB-level unique index and the duplicate check above
+    /// the insert is a read-then-write, so two simultaneous registrations for the same
+    /// address can both pass the check. The loser must get the same generic 409 as any
+    /// other duplicate, NOT a 500 from an unmapped ConcurrencyException.
+    ///
+    /// The conflict is simulated at the repository boundary because the EF Core
+    /// InMemory provider does not enforce unique indexes at all.
+    /// </summary>
+    [Fact]
+    public async Task RegisterAsync_WhenAConcurrentRegistrationWinsTheRace_ThrowsConflict()
+    {
+        using var db = CreateDb();
+        var users = new Mock<IUserRepository>();
+        users
+            .Setup(u => u.ExistsByEmailAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false); // the check passes — the other request hasn't committed yet
+        users
+            .Setup(u => u.AddAsync(It.IsAny<User>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ConcurrencyException("simulated unique violation", new InvalidOperationException()));
+        var sut = CreateSut(db, userRepository: users.Object);
+
+        var error = await Assert.ThrowsAsync<ConflictException>(() =>
+            sut.RegisterAsync(new RegisterRequest("race@example.com", "password123", null)));
+
+        // Identical to the ordinary duplicate path — otherwise the difference between
+        // the two would leak whether the address was already registered.
+        Assert.Equal("Unable to register with the provided details.", error.Message);
     }
 
     [Fact]

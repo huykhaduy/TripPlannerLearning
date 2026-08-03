@@ -27,6 +27,14 @@ namespace TripPlanner.Application.Features.Auth;
 /// </summary>
 public class AuthService : IAuthService
 {
+    /// <summary>
+    /// Deliberately vague, and deliberately shared by both rejection paths (the
+    /// in-memory check and the unique-index backstop): a caller must not be able to
+    /// tell "this email is taken" from anything else, or registration becomes an
+    /// account-enumeration oracle (F4/US1).
+    /// </summary>
+    private const string RegistrationRejectedMessage = "Unable to register with the provided details.";
+
     private readonly IUserRepository _users;
     private readonly IPasswordHasher _passwordHasher;
     private readonly IJwtTokenGenerator _tokenGenerator;
@@ -68,9 +76,7 @@ public class AuthService : IAuthService
         var emailTaken = await _users.ExistsByEmailAsync(email, cancellationToken);
         if (emailTaken)
         {
-            // Generic message — do not reveal whether the email exists (avoids
-            // account enumeration, Feature 4 / US1).
-            throw new ConflictException("Unable to register with the provided details.");
+            throw new ConflictException(RegistrationRejectedMessage);
         }
 
         var user = new User
@@ -81,7 +87,18 @@ public class AuthService : IAuthService
             IsEmailVerified = false, // F4/US2 — flipped by VerifyEmailAsync once the emailed link is opened.
         };
 
-        await _users.AddAsync(user, cancellationToken);
+        try
+        {
+            await _users.AddAsync(user, cancellationToken);
+        }
+        catch (ConcurrencyException)
+        {
+            // Unique index on User.Email: the ExistsByEmailAsync check above is a
+            // read-then-write, so a concurrent registration for the same address can
+            // land between the two. Without this the loser got an unmapped
+            // ConcurrencyException and the caller saw a 500 instead of a 409.
+            throw new ConflictException(RegistrationRejectedMessage);
+        }
 
         // Registration still succeeds even if the email itself can't be sent
         // (SMTP down/misconfigured) — the user can retry via "resend
