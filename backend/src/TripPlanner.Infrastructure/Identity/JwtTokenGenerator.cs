@@ -1,6 +1,7 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using TripPlanner.Application.Common.Interfaces;
@@ -19,10 +20,12 @@ public class JwtTokenGenerator : IJwtTokenGenerator
     private static readonly TimeSpan EmailVerificationTtl = TimeSpan.FromHours(24);
 
     private readonly JwtSettings _settings;
+    private readonly ILogger<JwtTokenGenerator> _logger;
 
-    public JwtTokenGenerator(IOptions<JwtSettings> settings)
+    public JwtTokenGenerator(IOptions<JwtSettings> settings, ILogger<JwtTokenGenerator> logger)
     {
         _settings = settings.Value;
+        _logger = logger;
     }
 
     /// <summary>
@@ -96,21 +99,41 @@ public class JwtTokenGenerator : IJwtTokenGenerator
         // never match anything unless this is turned off for this handler.
         var handler = new JwtSecurityTokenHandler { MapInboundClaims = false };
 
+        // Checked before ValidateToken, which throws ArgumentException — NOT a
+        // SecurityTokenException — for input that isn't a JWT at all (null, blank, or
+        // arbitrary text). The verify endpoint hands the raw request value straight
+        // through, so that is ordinary input and must read as "invalid link".
+        if (!handler.CanReadToken(token))
+        {
+            _logger.LogWarning("Rejected an email-verification token that is not a readable JWT.");
+            return null;
+        }
+
         ClaimsPrincipal principal;
         try
         {
             principal = handler.ValidateToken(token, parameters, out _);
         }
-        catch (Exception)
+        catch (SecurityTokenException ex)
         {
-            // Expired, malformed, or badly signed — all read as "invalid link"
+            // Expired, badly signed, or wrong audience — all read as "invalid link"
             // to the caller rather than a 500.
+            //
+            // Narrow on purpose: catching every Exception would let a genuine bug
+            // (misconfigured validation parameters, an unusable signing key) also
+            // masquerade as a bad link, hiding it indefinitely.
+            _logger.LogWarning(ex, "Rejected an email-verification token.");
             return null;
         }
 
         if (principal.FindFirst(PurposeClaimType)?.Value != EmailVerificationPurpose)
         {
-            return null; // e.g. someone tried to replay a normal access token here
+            // The signature was valid but the token was issued for something else —
+            // i.e. someone replayed an access token against the verify endpoint.
+            // Worth its own line: a valid signature makes this more interesting than
+            // an ordinary expired link.
+            _logger.LogWarning("Rejected a validly-signed token with the wrong purpose claim.");
+            return null;
         }
 
         return Guid.TryParse(principal.FindFirst(JwtRegisteredClaimNames.Sub)?.Value, out var userId)

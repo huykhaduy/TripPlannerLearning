@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
 using TripPlanner.Application.Common.Exceptions;
@@ -84,7 +85,8 @@ public class DestinationServiceTests
         FakeClock? clock = null,
         Mock<IImageSearchProvider>? imageSearch = null) =>
         new(new DestinationRepository(db), provider.Object, (imageSearch ?? NoOpImageSearch()).Object,
-            new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions())), clock ?? new FakeClock());
+            new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions())), clock ?? new FakeClock(),
+            NullLogger<DestinationService>.Instance);
 
     /// <summary>Shorthand — coordinates don't matter for these tests.</summary>
     private static LocationSuggestionDto Suggestion(string name, string? country = null) =>

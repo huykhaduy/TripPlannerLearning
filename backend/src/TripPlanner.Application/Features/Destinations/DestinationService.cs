@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
 using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.Extensions.Logging;
 using TripPlanner.Application.Common.Exceptions;
 using TripPlanner.Application.Common.Interfaces;
 using TripPlanner.Application.Common.Validation;
@@ -61,18 +62,28 @@ public class DestinationService : IDestinationService
     private readonly IDistributedCache _cache;
     private readonly TimeProvider _clock;
 
+    /// <summary>
+    /// The only logger in the Application layer, and deliberately so. Every other
+    /// failure here originates in an Infrastructure adapter, which logs it at the
+    /// source. The cache-envelope deserialize below is the exception: it fails against
+    /// this project's OWN JSON contract, so there is no adapter to push it into.
+    /// </summary>
+    private readonly ILogger<DestinationService> _logger;
+
     public DestinationService(
         IDestinationRepository destinations,
         IDestinationProvider provider,
         IImageSearchProvider imageSearch,
         IDistributedCache cache,
-        TimeProvider clock)
+        TimeProvider clock,
+        ILogger<DestinationService> logger)
     {
         _destinations = destinations;
         _provider = provider;
         _imageSearch = imageSearch;
         _cache = cache;
         _clock = clock;
+        _logger = logger;
     }
 
     /// <summary>
@@ -110,8 +121,13 @@ public class DestinationService : IDestinationService
         {
             return JsonSerializer.Deserialize<CacheEnvelope<T>>(bytes);
         }
-        catch (JsonException)
+        catch (JsonException ex)
         {
+            // Treated as a miss (see the remarks above), but NOT silently: entries live
+            // for CacheRetention (7 days), so a reshaped DTO invalidates every cached
+            // entry of that type for a week. Without this line that looks exactly like
+            // "the cache mysteriously stopped working".
+            _logger.LogWarning(ex, "Discarding a cache entry for {Key} that no longer matches {Type}.", key, typeof(T).Name);
             return null;
         }
     }

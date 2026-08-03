@@ -18,6 +18,11 @@
     <PackageReference Include="FluentValidation" Version="12.1.1" />
     <PackageReference Include="Microsoft.Extensions.Caching.Abstractions" Version="10.0.9" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.9" />
+    <!-- Abstractions only. DestinationService logs cache-contract failures that
+         originate in this layer; every other failure is logged by its adapter. -->
+    <!-- 10.0.9 to match the sibling Extensions packages above: 10.0.10 pulls
+         DependencyInjection.Abstractions >= 10.0.10 and trips NU1605. -->
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.9" />
   </ItemGroup>
 
 </Project>

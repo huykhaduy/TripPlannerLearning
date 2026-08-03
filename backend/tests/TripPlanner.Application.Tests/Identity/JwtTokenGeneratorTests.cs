@@ -1,5 +1,6 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Text;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using TripPlanner.Domain.Entities;
@@ -17,13 +18,15 @@ namespace TripPlanner.Application.Tests.Identity;
 public class JwtTokenGeneratorTests
 {
     private static JwtTokenGenerator CreateSut() =>
-        new(Options.Create(new JwtSettings
-        {
-            Issuer = "TripPlanner",
-            Audience = "TripPlannerClient",
-            Key = "unit-test-signing-key-min-32-chars-long!",
-            ExpiryMinutes = 60,
-        }));
+        new(
+            Options.Create(new JwtSettings
+            {
+                Issuer = "TripPlanner",
+                Audience = "TripPlannerClient",
+                Key = "unit-test-signing-key-min-32-chars-long!",
+                ExpiryMinutes = 60,
+            }),
+            NullLogger<JwtTokenGenerator>.Instance);
 
     private static User CreateUser() => new()
     {
