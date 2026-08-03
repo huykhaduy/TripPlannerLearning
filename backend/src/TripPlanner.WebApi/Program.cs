@@ -33,7 +33,31 @@ builder.Services.AddControllers();
 // 2. Authentication — validate the JWTs issued by JwtTokenGenerator.
 // ---------------------------------------------------------------------------
 var jwtSection = builder.Configuration.GetSection(JwtSettings.SectionName);
-var signingKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSection["Key"]!));
+
+// Fail fast, naming both the setting and the file it belongs in. Note the check
+// is for BLANK, not just missing: .env.example ships "Jwt__Key=" with no value,
+// so the usual first-run mistake is an empty string. Left unguarded, startup
+// died inside Encoding.UTF8.GetBytes/SymmetricSecurityKey with a message
+// ("Value cannot be null. (Parameter 's')") that names neither.
+var jwtKey = jwtSection["Key"];
+if (string.IsNullOrWhiteSpace(jwtKey))
+{
+    throw new InvalidOperationException(
+        "Jwt__Key is not configured. Copy backend/src/TripPlanner.WebApi/.env.example to .env "
+        + "and set Jwt__Key to a random secret of at least 32 characters.");
+}
+
+var jwtKeyBytes = Encoding.UTF8.GetBytes(jwtKey);
+if (jwtKeyBytes.Length < JwtSettings.MinKeyBytes)
+{
+    // A short key survives startup but throws on the FIRST login attempt,
+    // deep inside the signing call — catch it here where the fix is obvious.
+    throw new InvalidOperationException(
+        $"Jwt__Key is too short ({jwtKeyBytes.Length} bytes). HMAC-SHA256 signing requires at least "
+        + $"{JwtSettings.MinKeyBytes} — set Jwt__Key in backend/src/TripPlanner.WebApi/.env to a longer random secret.");
+}
+
+var signingKey = new SymmetricSecurityKey(jwtKeyBytes);
 
 builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)

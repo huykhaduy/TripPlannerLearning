@@ -1,5 +1,6 @@
 using System.Net;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Hosting;
 using TripPlanner.Application.Common.Exceptions;
 using TripPlanner.Domain.Exceptions;
 
@@ -15,11 +16,13 @@ public class ExceptionHandlingMiddleware
 {
     private readonly RequestDelegate _next;
     private readonly ILogger<ExceptionHandlingMiddleware> _logger;
+    private readonly IHostEnvironment _environment;
 
-    public ExceptionHandlingMiddleware(RequestDelegate next, ILogger<ExceptionHandlingMiddleware> logger)
+    public ExceptionHandlingMiddleware(RequestDelegate next, ILogger<ExceptionHandlingMiddleware> logger, IHostEnvironment environment)
     {
         _next = next;
         _logger = logger;
+        _environment = environment;
     }
 
     public async Task InvokeAsync(HttpContext context)
@@ -53,11 +56,21 @@ public class ExceptionHandlingMiddleware
             _logger.LogError(exception, "Unhandled exception");
         }
 
+        // exception.Message is safe to echo back for the exceptions above: each is
+        // thrown deliberately from the Application layer with a client-facing
+        // message. An exception that falls through to the generic 500 branch was
+        // NOT written for client consumption — it may be a raw DbUpdateException,
+        // NullReferenceException, etc. whose message can contain SQL/internal
+        // details, so only expose it outside Development.
+        var detail = status == HttpStatusCode.InternalServerError && !_environment.IsDevelopment()
+            ? "An unexpected error occurred."
+            : exception.Message;
+
         var problem = new ProblemDetails
         {
             Status = (int)status,
             Title = title,
-            Detail = exception.Message,
+            Detail = detail,
         };
 
         // Attach field-level errors for validation failures.

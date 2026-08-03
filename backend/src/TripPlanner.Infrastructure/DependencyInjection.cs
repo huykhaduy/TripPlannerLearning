@@ -45,13 +45,18 @@ public static class DependencyInjection
         // Explicit timeout: search/attractions/details all sit in the request
         // path a user is actively waiting on, so a hung Geoapify call shouldn't
         // be allowed to ride the ~100s HttpClient default.
+        // RemoveAllLoggers(): Geoapify's API takes apiKey as a query-string parameter
+        // (it has no header-based auth option), and HttpClientFactory's built-in
+        // logging handlers log the full request URI at Information level by
+        // default — without this, every search/attractions/details call would
+        // write the live API key to whatever log sink is configured.
         services.Configure<GeoapifySettings>(configuration.GetSection(GeoapifySettings.SectionName));
         services.AddHttpClient<IDestinationProvider, GeoapifyClient>(client =>
         {
             var baseUrl = configuration["Geoapify:BaseUrl"] ?? "https://api.geoapify.com/";
             client.BaseAddress = new Uri(baseUrl);
             client.Timeout = TimeSpan.FromSeconds(10);
-        });
+        }).RemoveAllLoggers();
 
         // Image search, used to fill in attraction thumbnails the destination
         // provider itself doesn't return (typed HttpClient + bound settings).

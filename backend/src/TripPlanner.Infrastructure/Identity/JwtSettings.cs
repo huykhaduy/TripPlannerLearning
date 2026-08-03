@@ -12,6 +12,13 @@ public class JwtSettings
     public const string DefaultIssuer = "TripPlanner";
     public const string DefaultAudience = "TripPlannerClient";
 
+    /// <summary>
+    /// HMAC-SHA256 (the algorithm JwtTokenGenerator signs with) requires a key
+    /// of at least 256 bits, so anything shorter than 32 bytes is rejected at
+    /// startup rather than failing on the first login. Enforced in Program.cs.
+    /// </summary>
+    public const int MinKeyBytes = 32;
+
     public string Issuer { get; set; } = DefaultIssuer;
     public string Audience { get; set; } = DefaultAudience;
 
