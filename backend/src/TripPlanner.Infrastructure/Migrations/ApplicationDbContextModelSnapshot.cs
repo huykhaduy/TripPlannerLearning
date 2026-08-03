@@ -140,11 +140,6 @@ namespace TripPlanner.Infrastructure.Migrations
                     b.HasIndex("ItineraryDayId", "DestinationId")
                         .IsUnique();
 
-                    b.HasIndex("TripId", "DestinationId")
-                        .IsUnique()
-                        .HasDatabaseName("IX_ItineraryItems_TripId_DestinationId_SavedPlaces")
-                        .HasFilter("\"ItineraryDayId\" IS NULL");
-
                     b.ToTable("ItineraryItems");
                 });
 
