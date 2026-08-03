@@ -59,7 +59,8 @@ public class AuthServiceTests
         // Real validators — pure logic, so mocking them would only hide bugs.
         return new AuthService(
             users, unitOfWork, hasher, tokenGenerator.Object, email.Object, appUrls.Object,
-            new RegisterRequestValidator(), new ResendVerificationRequestValidator());
+            new RegisterRequestValidator(), new ResendVerificationRequestValidator(),
+            new LoginRequestValidator());
     }
 
     [Fact]
@@ -165,6 +166,27 @@ public class AuthServiceTests
 
         await Assert.ThrowsAsync<ForbiddenException>(() =>
             sut.LoginAsync(new LoginRequest("user@example.com", "password123")));
+    }
+
+    /// <summary>
+    /// F4/US3 — a blank or missing field is a malformed request (400), not a
+    /// failed credential check (401). Before LoginRequestValidator existed, a
+    /// null email reached NormalizeEmail and threw NullReferenceException,
+    /// which the middleware could only report as a 500.
+    /// </summary>
+    [Theory]
+    [InlineData(null, "password123")]
+    [InlineData("", "password123")]
+    [InlineData("   ", "password123")]
+    [InlineData("user@example.com", null)]
+    [InlineData("user@example.com", "")]
+    public async Task LoginAsync_WithMissingCredentials_ThrowsValidation(string? email, string? password)
+    {
+        using var db = CreateDb();
+        var sut = CreateSut(db);
+
+        await Assert.ThrowsAsync<ValidationException>(() =>
+            sut.LoginAsync(new LoginRequest(email!, password!)));
     }
 
     [Fact]

@@ -36,6 +36,7 @@ public class AuthService : IAuthService
     private readonly IAppUrlProvider _appUrls;
     private readonly IValidator<RegisterRequest> _registerValidator;
     private readonly IValidator<ResendVerificationRequest> _resendValidator;
+    private readonly IValidator<LoginRequest> _loginValidator;
 
     public AuthService(
         IUserRepository users,
@@ -45,7 +46,8 @@ public class AuthService : IAuthService
         IEmailSender emailSender,
         IAppUrlProvider appUrls,
         IValidator<RegisterRequest> registerValidator,
-        IValidator<ResendVerificationRequest> resendValidator)
+        IValidator<ResendVerificationRequest> resendValidator,
+        IValidator<LoginRequest> loginValidator)
     {
         _users = users;
         _unitOfWork = unitOfWork;
@@ -55,6 +57,7 @@ public class AuthService : IAuthService
         _appUrls = appUrls;
         _registerValidator = registerValidator;
         _resendValidator = resendValidator;
+        _loginValidator = loginValidator;
     }
 
     public async Task<UserDto> RegisterAsync(RegisterRequest request, CancellationToken cancellationToken = default)
@@ -157,6 +160,11 @@ public class AuthService : IAuthService
 
     public async Task<AuthResponse> LoginAsync(LoginRequest request, CancellationToken cancellationToken = default)
     {
+        // Presence only — LoginRequestValidator explains why login deliberately
+        // does not re-apply the registration password policy. Without this, a
+        // null email reached NormalizeEmail below and 500'd instead of 400'd.
+        await _loginValidator.ValidateAndThrowAppExceptionAsync(request, cancellationToken);
+
         var email = NormalizeEmail(request.Email);
 
         var user = await _users.GetByEmailAsync(email, cancellationToken);
