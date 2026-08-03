@@ -79,11 +79,7 @@ public static class DependencyInjection
         services.AddDbContext<ApplicationDbContext>(options =>
             options.UseNpgsql(configuration.GetConnectionString("Postgres")));
 
-        // Generic repository + unit of work (open generic covers IRepository<ItineraryDay>,
-        // IRepository<ItineraryItem> directly; entity-specific repositories are
-        // registered individually as they're introduced in later tasks).
-        services.AddScoped(typeof(IRepository<>), typeof(Repository<>));
-        services.AddScoped<IUnitOfWork, UnitOfWork>();
+        // One repository per aggregate root; each saves its own changes.
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IDestinationRepository, DestinationRepository>();
         services.AddScoped<ITripRepository, TripRepository>();
