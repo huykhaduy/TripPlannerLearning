@@ -23,10 +23,7 @@ namespace TripPlanner.Application.Features.Trips;
 public class TripService : ITripService
 {
     private readonly ITripRepository _trips;
-    private readonly IRepository<ItineraryDay> _itineraryDays;
-    private readonly IRepository<ItineraryItem> _itineraryItems;
     private readonly IDestinationRepository _destinations;
-    private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserService _currentUser;
     private readonly IDestinationProvider _destinationProvider;
     private readonly IImageSearchProvider _imageSearch;
@@ -37,10 +34,7 @@ public class TripService : ITripService
 
     public TripService(
         ITripRepository trips,
-        IRepository<ItineraryDay> itineraryDays,
-        IRepository<ItineraryItem> itineraryItems,
         IDestinationRepository destinations,
-        IUnitOfWork unitOfWork,
         ICurrentUserService currentUser,
         IDestinationProvider destinationProvider,
         IImageSearchProvider imageSearch,
@@ -50,10 +44,7 @@ public class TripService : ITripService
         IValidator<UpdateItineraryItemRequest> updateItemValidator)
     {
         _trips = trips;
-        _itineraryDays = itineraryDays;
-        _itineraryItems = itineraryItems;
         _destinations = destinations;
-        _unitOfWork = unitOfWork;
         _currentUser = currentUser;
         _destinationProvider = destinationProvider;
         _imageSearch = imageSearch;
@@ -101,8 +92,7 @@ public class TripService : ITripService
             UserId = _currentUser.GetRequiredUserId(),
         };
 
-        _trips.Add(trip);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        await _trips.AddAsync(trip, cancellationToken);
 
         return trip.ToSummaryDto();
     }
@@ -113,7 +103,7 @@ public class TripService : ITripService
 
         var userId = _currentUser.GetRequiredUserId();
 
-        var trip = await _trips.GetTrackedWithFullGraphAsync(tripId, userId, cancellationToken)
+        var trip = await _trips.GetForUpdateAsync(tripId, userId, cancellationToken)
             ?? throw new NotFoundException(nameof(Trip), tripId);
 
         trip.Name = request.Name.Trim();
@@ -122,7 +112,7 @@ public class TripService : ITripService
 
         RegenerateDays(trip);
 
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        await _trips.UpdateAsync(trip, cancellationToken);
 
         return trip.ToDetailDto();
     }
@@ -153,8 +143,9 @@ public class TripService : ITripService
                 item.ItineraryDayId = null;
             }
 
+            // Trip.Days is configured OnDelete(Cascade), so removing the day from
+            // the tracked collection marks the row deleted.
             trip.Days.Remove(day);
-            _itineraryDays.Remove(day);
         }
 
         var existingDates = trip.Days.Select(d => d.Date).ToHashSet();
@@ -162,9 +153,9 @@ public class TripService : ITripService
         {
             var day = new ItineraryDay { TripId = trip.Id, Date = date };
             trip.Days.Add(day);
-            // Explicit Add: BaseEntity self-assigns the Guid key, so EF's graph
-            // discovery would classify this as an EXISTING row (UPDATE, not INSERT).
-            _itineraryDays.Add(day);
+            // Explicit staging: BaseEntity self-assigns the Guid key, so EF would
+            // otherwise classify this as an EXISTING row (UPDATE, not INSERT).
+            _trips.AddDay(day);
         }
 
         var dayNumber = 1;
@@ -180,7 +171,7 @@ public class TripService : ITripService
 
         var userId = _currentUser.GetRequiredUserId();
 
-        var trip = await _trips.GetTrackedWithFullGraphAsync(tripId, userId, cancellationToken)
+        var trip = await _trips.GetForUpdateAsync(tripId, userId, cancellationToken)
             ?? throw new NotFoundException(nameof(Trip), tripId);
 
         await EnsureDayBelongsToTripAsync(request.ItineraryDayId, trip.Id, cancellationToken);
@@ -204,11 +195,11 @@ public class TripService : ITripService
             SortOrder = bucket.Count == 0 ? 0 : bucket.Max(i => i.SortOrder) + 1,
         };
         trip.Items.Add(item);
-        _itineraryItems.Add(item);
+        _trips.AddItem(item); // see AddDay — self-assigned key would otherwise mean UPDATE
 
         try
         {
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            await _trips.UpdateAsync(trip, cancellationToken);
         }
         catch (ConcurrencyException)
         {
@@ -226,7 +217,7 @@ public class TripService : ITripService
 
         var userId = _currentUser.GetRequiredUserId();
 
-        var trip = await _trips.GetTrackedWithFullGraphAsync(tripId, userId, cancellationToken)
+        var trip = await _trips.GetForUpdateAsync(tripId, userId, cancellationToken)
             ?? throw new NotFoundException(nameof(Trip), tripId);
 
         var item = trip.Items.FirstOrDefault(i => i.Id == itemId)
@@ -266,7 +257,7 @@ public class TripService : ITripService
 
         try
         {
-            await _unitOfWork.SaveChangesAsync(cancellationToken); // single save: both buckets move atomically
+            await _trips.UpdateAsync(trip, cancellationToken); // single save: both buckets move atomically
         }
         catch (ConcurrencyException)
         {
@@ -342,18 +333,15 @@ public class TripService : ITripService
             }
         }
 
-        _destinations.Add(destination);
-
         try
         {
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            await _destinations.AddAsync(destination, cancellationToken);
             return destination;
         }
         catch (ConcurrencyException)
         {
             // Unique index on ProviderId: a concurrent request inserted the same
-            // place first. Discard our copy and use the winner's row.
-            _destinations.Remove(destination);
+            // place first. Use the winner's row instead of ours.
             return await _destinations.GetByProviderIdAsync(providerId, cancellationToken)
                 ?? throw new InvalidOperationException($"Destination '{providerId}' vanished after a concurrency conflict.");
         }
@@ -376,7 +364,6 @@ public class TripService : ITripService
             ?? throw new NotFoundException(nameof(ItineraryItem), itemId);
 
         // SortOrder gaps left by the removal are harmless — ordering is relative.
-        _itineraryItems.Remove(item);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        await _trips.RemoveItemAsync(item, cancellationToken);
     }
 }

@@ -38,10 +38,7 @@ public class TripServiceTests
 
         return new TripService(
             new TripRepository(db),
-            new Repository<Domain.Entities.ItineraryDay>(db),
-            new Repository<Domain.Entities.ItineraryItem>(db),
             new DestinationRepository(db),
-            new UnitOfWork(db),
             currentUser.Object,
             provider ?? Mock.Of<IDestinationProvider>(),
             (imageSearch ?? NoOpImageSearch()).Object,
