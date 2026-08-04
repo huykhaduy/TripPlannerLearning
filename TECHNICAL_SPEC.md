@@ -685,8 +685,9 @@ following `api/auth.ts`'s pattern — no raw `fetch`/`axios` calls remain in com
 5. **Domain validation** — `Trip.SetDates` (start ≤ end), now actively called from
    `TripService.UpdateTripAsync`.
 6. **Database constraints** — required columns, max lengths (`Email` 256,
-   `DisplayName` 100, `Trip.Name` 200, `Destination.ProviderId` 128 / `Name` 300 /
-   `Category` 200 / `ImageUrl` & `Website` 2048), unique indexes (B4, B8, B9),
+   `DisplayName` 100, `Trip.Name` 200, `Destination.Name` 300 / `Category` 200 /
+   `ImageUrl` & `Website` 2048 — `Destination.ProviderId` is deliberately
+   **unbounded** `text`, see §"Provider id length" below), unique indexes (B4, B8, B9),
    FK delete behaviors.
 
 **Not present [Observed]:** action filters, custom model binders, DataAnnotations on
@@ -794,7 +795,7 @@ erDiagram
     }
     Destinations {
         uuid Id PK
-        varchar ProviderId UK "max 128, NOT NULL (Geoapify place_id)"
+        text ProviderId UK "unbounded, NOT NULL (Geoapify place_id)"
         varchar Name "max 300, NOT NULL"
         varchar Category "max 200, NULL"
         text Description "NULL"
@@ -857,7 +858,7 @@ default), `CreatedAt` (set in C# at construction), `UpdatedAt` (stamped by the
 | Column | Type | Nullable | Constraint |
 |---|---|---|---|
 | `Id` | uuid | no | PK (internal Guid, distinct from the provider's id) |
-| `ProviderId` | character varying(128) | no | **UNIQUE** (`IX_Destinations_ProviderId`) — one row per external place |
+| `ProviderId` | text | no | **UNIQUE** (`IX_Destinations_ProviderId`) — one row per external place; deliberately unbounded, see §"Provider id length" |
 | `Name` | character varying(300) | no | |
 | `Category` | character varying(200) | yes | |
 | `Description` | text | yes | |
@@ -1357,9 +1358,41 @@ configured in DI (`https://api.geoapify.com/`); relative URLs below.
 - Provider errors (429/5xx/timeouts): let unexpected exceptions bubble (→ 500), but
   see the caching fallback below. **[Design decision]** Namespace stored provider ids
   (`"gaf:" + place_id`) if multi-provider support is anticipated; otherwise keep the
-  raw `place_id` — choose once, before the first `Destination` row is written. Note
-  Geoapify `place_id`s are long hex strings (~50 chars); they fit the 128-char
-  `ProviderId` column.
+  raw `place_id` — choose once, before the first `Destination` row is written.
+
+##### Provider id length
+
+**[Observed]** A Geoapify `place_id` is **not** a fixed-width hash, and an earlier
+version of this document was wrong to estimate "~50 chars". It is a **~68-character
+prefix followed by the hex-encoded UTF-8 place name** — 2 id characters per name byte,
+so 6 per character in a 3-byte script. Measured across 60 real POIs in Paris, Berlin,
+and Bangkok:
+
+| | |
+|---|---|
+| Length range | **62 – 328** characters |
+| Derived prefix (`len − 2×nameBytes`) | 68–70, stable |
+| Share exceeding 128 chars | **7 of 60 (~12%)** |
+
+Worst case sampled: a 129-byte Thai museum name → a **328-character** id. Latin names
+break 128 too (`Plaque commémorative Chaya WAJSFISZ et Noël FRIEDHEIM` → 178).
+
+Consequences to preserve:
+
+- `Destination.ProviderId` is **unbounded `text`** — do not reintroduce a
+  `HasMaxLength`. The failure mode was Postgres `22001` on
+  `TripService.GetOrCreateDestinationAsync`'s INSERT, i.e. an unhandled **500 on "add
+  to trip"** for any place with a long or non-Latin name, while the browse and details
+  paths (which never persist) worked fine and hid the bug. Any replacement number is
+  the same guess about an opaque external id; `text` costs nothing over `varchar(n)` in
+  Postgres, and the only real ceiling is the ~2704-byte btree limit on
+  `IX_Destinations_ProviderId` (a ~1300-character place name).
+- The **validators must not** gain a provider-id length rule — capping it there would
+  reject legitimate places rather than fixing anything.
+- EF Core's InMemory provider does not enforce `HasMaxLength`, so `dotnet test` can
+  never catch a reintroduced cap behaviourally — the same class of blind spot as the
+  unique-violation translation. `DestinationConfigurationTests` therefore pins the
+  absence by asserting the **model metadata**.
 
 #### `DestinationService` (Application)
 
