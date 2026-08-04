@@ -217,9 +217,17 @@ a silent no-op — the listener-cleanup test now asserts against the `addEventLi
 `removeEventListener` pair instead. And a test asserting only that things are *absent*
 passes just as happily when the page crashes; pair every absence check with a positive one.
 
-Still untested: `RegisterPage`, `VerifyEmailPage`, `SearchPage`, and the destination
-sub-components (`CitySearchInput`, `AttractionsList`, `NearbyAttractions`,
-`AddToTripButton`). `types.ts` covers `User`/`AuthResponse` plus every destination/trip
+Every feature page and destination sub-component now has a test file except
+`AttractionsList`, `AttractionCard` and `TripThumbnail`.
+
+`CitySearchInput.test.tsx` uses **real timers**: the 300 ms debounce fits inside
+`findBy*`'s 1 s default, which is simpler and less brittle than driving fake timers
+through `userEvent`. Its "does not re-search the label it just wrote" and "resyncs when
+the selected city changes underneath it" cases exist because putting `pickedLabel` in the
+search effect's dependency array made picking a suggestion fire a **second** request that
+reopened the dropdown over the user's choice — the guard couldn't match while
+`debouncedQuery` still held the old query. It is a ref for that reason; do not turn it
+back into state. `types.ts` covers `User`/`AuthResponse` plus every destination/trip
 DTO consumed by the feature pages — add new shared shapes here rather than declaring
 ad-hoc inline interfaces in components.
 
