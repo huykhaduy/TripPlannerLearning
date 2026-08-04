@@ -1,4 +1,4 @@
-import { useEffect, useId, useState, type KeyboardEvent } from 'react';
+import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
 import { searchLocations } from '../../api/destinations';
 import { useDebounce } from '../../hooks/useDebounce';
 import type { LocationSuggestion } from '../../types';
@@ -32,7 +32,12 @@ export function CitySearchInput({
   // re-trigger the search below and reopen the dropdown — skip that query.
   // Also seeded from initialCity so a restored city (from the URL) doesn't
   // immediately re-search itself on mount.
-  const [pickedLabel, setPickedLabel] = useState<string | null>(initialLabel || null);
+  //
+  // A ref, not state, on purpose: as a dependency of the search effect it would
+  // re-run that effect the instant a suggestion is picked, while debouncedQuery
+  // still held the OLD query — so the guard below wouldn't match, and the pick
+  // would fire a second search that reopened the dropdown over the user's choice.
+  const pickedLabelRef = useRef<string | null>(initialLabel || null);
   const [activeIndex, setActiveIndex] = useState(-1);
   const listboxId = useId();
 
@@ -43,14 +48,14 @@ export function CitySearchInput({
   // the actual selected-city label changes underneath the component.
   useEffect(() => {
     setQuery(initialLabel);
-    setPickedLabel(initialLabel || null);
+    pickedLabelRef.current = initialLabel || null;
   }, [initialLabel]);
 
   const debouncedQuery = useDebounce(query, 300);
 
   useEffect(() => {
     const trimmed = debouncedQuery.trim();
-    if (trimmed.length < MIN_QUERY_LENGTH || trimmed === pickedLabel) {
+    if (trimmed.length < MIN_QUERY_LENGTH || trimmed === pickedLabelRef.current) {
       setSuggestions([]);
       setOpen(false);
       setLoading(false);
@@ -80,7 +85,7 @@ export function CitySearchInput({
     return () => {
       ignore = true;
     };
-  }, [debouncedQuery, pickedLabel]);
+  }, [debouncedQuery]);
 
   useEffect(() => {
     setActiveIndex(-1);
@@ -89,7 +94,7 @@ export function CitySearchInput({
   function handlePick(city: LocationSuggestion) {
     const label = formatCity(city);
     setQuery(label);
-    setPickedLabel(label);
+    pickedLabelRef.current = label;
     setOpen(false);
     setSuggestions([]);
     onSelect(city);
