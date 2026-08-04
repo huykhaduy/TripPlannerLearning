@@ -128,12 +128,14 @@ describe('DestinationDetailsPage', () => {
   });
 
   it('shows a loading state before the request settles', () => {
-    // Never resolves — the page must not render an error or an empty shell.
+    // Never resolves, so the page stays in its pending branch.
     vi.mocked(destinationsApi.getDestinationDetails).mockReturnValue(new Promise(() => {}));
 
     renderDetails();
 
+    // Asserted positively: absence checks alone would also pass if the page
+    // crashed or rendered nothing at all.
+    expect(screen.getByText('Loading destination…')).toBeInTheDocument();
     expect(screen.queryByText('Destination not found.')).not.toBeInTheDocument();
-    expect(screen.queryByText('Golden Bridge')).not.toBeInTheDocument();
   });
 });

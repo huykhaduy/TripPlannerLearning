@@ -135,20 +135,27 @@ describe('AuthProvider', () => {
     expect(localStorage.getItem(USER_STORAGE_KEY)).toBeNull();
   });
 
-  it('stops listening for the logout event once unmounted', async () => {
-    vi.mocked(authApi.login).mockResolvedValue(authResponse);
-    const { unmount } = renderWithProvider();
-    await userEvent.click(screen.getByRole('button', { name: 'login' }));
+  it('stops listening for the logout event once unmounted', () => {
+    // Asserted against the listener registry rather than through behaviour: React 18
+    // made setState-on-an-unmounted-component a silent no-op, so a leaked listener
+    // throws nothing and logs nothing. Only add/remove bookkeeping can detect it.
+    const added = vi.spyOn(window, 'addEventListener');
+    const removed = vi.spyOn(window, 'removeEventListener');
 
-    unmount();
+    try {
+      const { unmount } = renderWithProvider();
+      const registered = added.mock.calls.find(([type]) => type === AUTH_LOGOUT_EVENT);
+      expect(registered).toBeDefined();
 
-    // A leaked listener would call setState on an unmounted component. Dispatching
-    // after unmount must be inert.
-    expect(() =>
-      act(() => {
-        window.dispatchEvent(new Event(AUTH_LOGOUT_EVENT));
-      }),
-    ).not.toThrow();
+      unmount();
+
+      // Same event AND same handler reference — removeEventListener silently does
+      // nothing if the function identity differs.
+      expect(removed).toHaveBeenCalledWith(AUTH_LOGOUT_EVENT, registered![1]);
+    } finally {
+      added.mockRestore();
+      removed.mockRestore();
+    }
   });
 });
 
