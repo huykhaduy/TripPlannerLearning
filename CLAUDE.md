@@ -217,8 +217,7 @@ a silent no-op — the listener-cleanup test now asserts against the `addEventLi
 `removeEventListener` pair instead. And a test asserting only that things are *absent*
 passes just as happily when the page crashes; pair every absence check with a positive one.
 
-Every feature page and destination sub-component now has a test file except
-`TripThumbnail` (a pure gradient/photo fallback with no logic).
+Every feature page and component now has a test file.
 
 `CitySearchInput.test.tsx` uses **real timers**: the 300 ms debounce fits inside
 `findBy*`'s 1 s default, which is simpler and less brittle than driving fake timers
