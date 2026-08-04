@@ -183,7 +183,9 @@ refresh restore, the reactive-logout listener, and that register does *not* star
 session), `ProtectedRoute`'s redirect, and three feature pages — `LoginPage` (the 403 →
 resend-verification branch, and returning to the page that sent the user there),
 `TripsPage` (list/empty/load-error, the create-trip modal, and the F3/US10 status pill),
-and `DestinationDetailsPage` (404 → "not found" versus a retryable failure).
+`DestinationDetailsPage` (404 → "not found" versus a retryable failure), and
+`TripDetailPage` (load states, the edit modal, remove-with-confirm, optimistic
+drag-and-drop with rollback, and the Saved Places filter).
 
 Conventions these follow:
 
@@ -198,10 +200,26 @@ Conventions these follow:
   offset helper, so they cannot rot into failures on a future date.
 - `DestinationDetailsPage` needs an `AuthProvider` wrapper for its success path only —
   `AddToTripButton` calls `useAuth`, and the error paths return before rendering it.
+- `window.confirm` gates the destructive actions in `TripDetailPage`; stub it with
+  `vi.spyOn(window, 'confirm')` and assert **both** answers — declining must not call the
+  API.
+- Drag-and-drop is driven with `fireEvent.dragStart` / `fireEvent.drop` on the row and the
+  drop zone. jsdom has no real DnD, but the handlers are ordinary React props, so this
+  exercises the actual move logic including the optimistic-update rollback.
+- The Saved Places filter hides non-matching rows with a CSS class rather than unmounting
+  them, so index-based drop positions stay aligned with the unfiltered array. Assert on
+  `toHaveClass('hidden')`: no Tailwind stylesheet is loaded under jsdom, so `toBeVisible()`
+  cannot see `display: none` and would report hidden rows as visible.
 
-Still untested: `TripDetailPage` (the largest page — day scheduling, reordering, the edit
-form), `RegisterPage`, `VerifyEmailPage`, `SearchPage`, and the destination sub-components
-(`CitySearchInput`, `AttractionsList`, `NearbyAttractions`, `AddToTripButton`). `types.ts` covers `User`/`AuthResponse` plus every destination/trip
+Two lessons already paid for, worth keeping: a test whose only assertion was
+`expect(...).not.toThrow()` could never fail, because React 18 made setState-on-unmounted
+a silent no-op — the listener-cleanup test now asserts against the `addEventListener` /
+`removeEventListener` pair instead. And a test asserting only that things are *absent*
+passes just as happily when the page crashes; pair every absence check with a positive one.
+
+Still untested: `RegisterPage`, `VerifyEmailPage`, `SearchPage`, and the destination
+sub-components (`CitySearchInput`, `AttractionsList`, `NearbyAttractions`,
+`AddToTripButton`). `types.ts` covers `User`/`AuthResponse` plus every destination/trip
 DTO consumed by the feature pages — add new shared shapes here rather than declaring
 ad-hoc inline interfaces in components.
 
