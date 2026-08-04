@@ -154,9 +154,9 @@ dotnet test
 
 ---
 
-## Where to write your code
+## Where the feature code lives
 
-| You implement…            | File(s)                                                              |
+| Feature                   | File(s)                                                              |
 |---------------------------|---------------------------------------------------------------------|
 | Destination search/details| `backend/src/TripPlanner.Application/Features/Destinations/DestinationService.cs` |
 | External API calls        | `backend/src/TripPlanner.Infrastructure/ExternalApis/GeoapifyClient.cs`        |
@@ -164,9 +164,9 @@ dotnet test
 | Search & details UI       | `frontend/src/features/destinations/SearchPage.tsx`                              |
 | Trip planner UI           | `frontend/src/features/trips/TripsPage.tsx`                                      |
 
-Every stub throws `NotImplementedException` (backend) or shows a `TODO` (frontend),
-so the project compiles and runs from day one — you fill in the blanks feature by
-feature. **Study `AuthService.cs` and `AuthController.cs` first**: they are the
-blueprint for everything else.
+All four features are implemented — there are no `NotImplementedException` stubs left
+in `Application`, and no `TODO` placeholders in the frontend. **Study `AuthService.cs`
+and `AuthController.cs` first**: they are the worked example the other slices were
+modelled on, and the shortest path to understanding the layering.
 
 See [`ASSIGNMENT.md`](./ASSIGNMENT.md) for the full feature list and acceptance criteria.

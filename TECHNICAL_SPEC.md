@@ -60,11 +60,12 @@ IMPLEMENTATION" others were meant to be modeled on, but that framing is now hist
 Destinations and Trips have their own real business logic (caching, upsert-on-first-add,
 day regeneration, ownership filtering), not a copy of Auth's.
 
-**[Observed] Stale doc comments not yet cleaned up:** `GeoapifyClient.cs`'s XML doc
-comment still opens with "STUB — students implement this (Features 1 & 2)" and lists
-implementation tips, and `ITripService.cs`/`IDestinationService.cs`'s interface doc
-comments still say "TODO (students): implement `TripService`/`DestinationService`" —
-all three types are fully implemented; only the comments are stale.
+**[Observed] Scaffolding wording has been cleaned up:** no source file still carries
+"STUB — students implement this" or "TODO (students): implement ..." — `GeoapifyClient.cs`,
+`ITripService.cs` and `IDestinationService.cs` were the last three and now document what
+they actually do. A repo-wide search for `TODO`/`FIXME`/`NotImplementedException` in
+`backend/src` and `frontend/src` returns only `ExceptionHandlingMiddleware`'s 501 mapping,
+which is deliberate (see §"Exception mapping").
 
 ### 1.3 Cross-cutting conventions confirmed by the implementation
 
@@ -321,8 +322,9 @@ Images proxy) for thumbnails, fronted by an in-process `IMemoryCache`.
    characters** — throwing `ValidationException` (→ 400) otherwise.
 2. Cache-aside on the lowercased, trimmed query (`loc:{query}`, 24 h TTL): a fresh hit
    skips the provider call entirely.
-3. On a miss, call `GeoapifyClient.SearchLocationsAsync` (Geoapify autocomplete,
-   `type=city`/`country` results only), then **dedupe** by `(name, country)`,
+3. On a miss, call `GeoapifyClient.SearchLocationsAsync` (Geoapify autocomplete with
+   **no** `type=` restriction, keeping only `result_type` `city`/`country` via a
+   client-side filter), then **dedupe** by `(name, country)`,
    **rank** exact match → prefix match → everything else (`RelevanceRank`), and
    **cap at 5** (`MaxLocationResults`).
 
@@ -936,16 +938,13 @@ no SQLite provider or fallback anywhere in the project.
   project references Infrastructure (for `ApplicationDbContext`, the repository
   implementations, `BCryptPasswordHasher`, `JwtTokenGenerator`) even though it is
   named `Application.Tests`.
-- **[Observed]** The codebase is still explicitly a teaching template, but the
-  "reference vs. stub" framing is now stale in places: `AuthController`/`AuthService`'s
-  doc comments still call Auth the "REFERENCE IMPLEMENTATION"/"REFERENCE CONTROLLER",
-  which remains true as a *pedagogical* claim (it's still the example the others were
-  modeled on), but `GeoapifyClient.cs`'s doc comment still literally opens with
-  "STUB — students implement this (Features 1 & 2)", and `ITripService.cs`/`IDestinationService.cs`
-  still carry "TODO (students): implement..." — all three are fully implemented; only
-  the comments were never updated. `DestinationService.cs`, `TripService.cs`,
-  `TripsController.cs`, `DestinationsController.cs`, and `IDestinationProvider.cs`
-  have already had their stale "STUB" wording corrected.
+- **[Observed]** The codebase is still explicitly a teaching template, and the only
+  remaining trace of the "reference vs. stub" framing is `AuthController`/`AuthService`'s
+  doc comments calling Auth the "REFERENCE IMPLEMENTATION"/"REFERENCE CONTROLLER" — which
+  stays true as a *pedagogical* claim, since it is still the example the other slices were
+  modelled on. The "STUB — students implement this" / "TODO (students): implement ..."
+  wording is gone everywhere, `GeoapifyClient.cs`, `ITripService.cs` and
+  `IDestinationService.cs` having been the last three to be corrected.
 
 ### DI registrations (complete list) [Observed]
 
@@ -1340,6 +1339,18 @@ configured in DI (`https://api.geoapify.com/`); relative URLs below.
   - `GetAttractionsAsync` → `v2/places?categories=tourism.sights,tourism.attraction&filter=circle:{lon},{lat},{radiusMeters}&limit=20&apiKey={key}`
     (Places API). **Careful:** the circle filter is `lon,lat` — longitude FIRST —
     and the radius is in **meters** (`radiusKm * 1000`).
+
+  **[Observed] As built, two of these diverged from the plan above** — the plan is kept
+  as written because it records the original design intent, but the code is the
+  authority (`GeoapifyClient.cs`'s header carries the current endpoint map):
+  - No `type=city` on autocomplete, and `limit=10` rather than 5. Dropping `type` is the
+    "widen it if country-level results are wanted" branch the plan anticipated (F1/US2
+    covers city *and* country); over-fetching 10 leaves enough rows for the client-side
+    `result_type` filter to still yield the 5 `DestinationService` caps at.
+  - `categories` is broader than `tourism.sights,tourism.attraction` — see
+    `AttractionCategories`, which adds heritage, entertainment, parks, nature and
+    religious sites so the F1/US4 category filter has something to filter. Catering is
+    excluded on purpose: restaurants would crowd real sights out of the 20-result cap.
   - `GetDestinationDetailsAsync` → `v2/place-details?id={providerId}&apiKey={key}`
     (Place Details API; `providerId` is the Geoapify `place_id` from a Places
     result). Provider 404 / empty features → return `null` (the interface's

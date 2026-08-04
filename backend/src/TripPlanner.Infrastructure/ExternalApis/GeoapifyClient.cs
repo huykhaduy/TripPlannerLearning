@@ -17,8 +17,11 @@ namespace TripPlanner.Infrastructure.ExternalApis;
 /// https://api.geoapify.com/).
 ///
 /// Endpoint map:
-///   * SearchLocationsAsync        → GET v1/geocode/autocomplete?text={query}&amp;type=city&amp;limit=5&amp;apiKey={key}
-///   * GetAttractionsAsync         → GET v2/places?categories=tourism.sights,tourism.attraction
+///   * SearchLocationsAsync        → GET v1/geocode/autocomplete?text={query}&amp;limit=10&amp;apiKey={key}
+///                                     (no type= restriction — countries must surface too;
+///                                      over-fetches 10 because result_type filtering discards
+///                                      streets/districts, and DestinationService caps at 5)
+///   * GetAttractionsAsync         → GET v2/places?categories={AttractionCategories}
 ///                                        &amp;filter=circle:{lon},{lat},{radiusMeters}&amp;limit=20&amp;apiKey={key}
 ///                                     (note: Geoapify wants LON before LAT, and radius in METERS)
 ///   * GetDestinationDetailsAsync  → GET v2/place-details?id={placeId}&amp;apiKey={key}
