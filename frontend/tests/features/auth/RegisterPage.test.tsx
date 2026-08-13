@@ -2,20 +2,20 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { AuthProvider } from '../../auth/AuthContext';
-import { getToken } from '../../api/client';
-import { httpError } from '../../test/http';
-import { RegisterPage } from './RegisterPage';
-import type { User } from '../../types';
+import { AuthProvider } from '../../../src/auth/AuthContext';
+import { getToken } from '../../../src/api/client';
+import { httpError } from '../../http';
+import { RegisterPage } from '../../../src/features/auth/RegisterPage';
+import type { User } from '../../../src/types';
 
-vi.mock('../../api/auth', () => ({
+vi.mock('../../../src/api/auth', () => ({
   login: vi.fn(),
   register: vi.fn(),
   verifyEmail: vi.fn(),
   resendVerificationEmail: vi.fn(),
 }));
 
-import * as authApi from '../../api/auth';
+import * as authApi from '../../../src/api/auth';
 
 const created: User = {
   id: '11111111-1111-1111-1111-111111111111',

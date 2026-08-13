@@ -1,11 +1,11 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
-import { AuthProvider } from '../../auth/AuthContext';
-import { AttractionCard } from './AttractionCard';
-import type { AttractionSummary } from '../../types';
+import { AuthProvider } from '../../../src/auth/AuthContext';
+import { AttractionCard } from '../../../src/features/destinations/AttractionCard';
+import type { AttractionSummary } from '../../../src/types';
 
-vi.mock('../../api/auth', () => ({
+vi.mock('../../../src/api/auth', () => ({
   login: vi.fn(),
   register: vi.fn(),
   verifyEmail: vi.fn(),
@@ -13,7 +13,7 @@ vi.mock('../../api/auth', () => ({
 }));
 
 // AttractionCard embeds AddToTripButton, which reads the user's trips when opened.
-vi.mock('../../api/trips', () => ({
+vi.mock('../../../src/api/trips', () => ({
   getMyTrips: vi.fn(),
   getTrip: vi.fn(),
   createTrip: vi.fn(),

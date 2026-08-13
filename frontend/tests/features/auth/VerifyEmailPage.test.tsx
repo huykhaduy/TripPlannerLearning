@@ -1,17 +1,17 @@
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { httpError, networkError } from '../../test/http';
-import { VerifyEmailPage } from './VerifyEmailPage';
+import { httpError, networkError } from '../../http';
+import { VerifyEmailPage } from '../../../src/features/auth/VerifyEmailPage';
 
-vi.mock('../../api/auth', () => ({
+vi.mock('../../../src/api/auth', () => ({
   login: vi.fn(),
   register: vi.fn(),
   verifyEmail: vi.fn(),
   resendVerificationEmail: vi.fn(),
 }));
 
-import * as authApi from '../../api/auth';
+import * as authApi from '../../../src/api/auth';
 
 /** The page reads its token from the query string, exactly as the emailed link supplies it. */
 function renderVerify(search: string) {

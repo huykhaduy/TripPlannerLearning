@@ -1,20 +1,20 @@
 import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { AUTH_LOGOUT_EVENT, getToken } from '../api/client';
-import { AuthProvider, useAuth } from './AuthContext';
-import type { AuthResponse, User } from '../types';
+import { AUTH_LOGOUT_EVENT, getToken } from '../../src/api/client';
+import { AuthProvider, useAuth } from '../../src/auth/AuthContext';
+import type { AuthResponse, User } from '../../src/types';
 
 // The real module would hit the network; these tests are about what AuthProvider does
 // with the response, not about the HTTP call itself.
-vi.mock('../api/auth', () => ({
+vi.mock('../../src/api/auth', () => ({
   login: vi.fn(),
   register: vi.fn(),
   verifyEmail: vi.fn(),
   resendVerificationEmail: vi.fn(),
 }));
 
-import * as authApi from '../api/auth';
+import * as authApi from '../../src/api/auth';
 
 const USER_STORAGE_KEY = 'tripplanner.user';
 

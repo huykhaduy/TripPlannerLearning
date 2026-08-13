@@ -1,24 +1,24 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { AuthProvider } from '../../auth/AuthContext';
-import { NearbyAttractions } from './NearbyAttractions';
-import type { AttractionSummary } from '../../types';
+import { AuthProvider } from '../../../src/auth/AuthContext';
+import { NearbyAttractions } from '../../../src/features/destinations/NearbyAttractions';
+import type { AttractionSummary } from '../../../src/types';
 
-vi.mock('../../api/destinations', () => ({
+vi.mock('../../../src/api/destinations', () => ({
   searchLocations: vi.fn(),
   getAttractions: vi.fn(),
   getDestinationDetails: vi.fn(),
 }));
 
-vi.mock('../../api/auth', () => ({
+vi.mock('../../../src/api/auth', () => ({
   login: vi.fn(),
   register: vi.fn(),
   verifyEmail: vi.fn(),
   resendVerificationEmail: vi.fn(),
 }));
 
-vi.mock('../../api/trips', () => ({
+vi.mock('../../../src/api/trips', () => ({
   getMyTrips: vi.fn(),
   getTrip: vi.fn(),
   createTrip: vi.fn(),
@@ -28,7 +28,7 @@ vi.mock('../../api/trips', () => ({
   removeDestination: vi.fn(),
 }));
 
-import * as destinationsApi from '../../api/destinations';
+import * as destinationsApi from '../../../src/api/destinations';
 
 function attraction(providerId: string, name: string): AttractionSummary {
   return { providerId, name, category: 'landmark', imageUrl: null, rating: null };

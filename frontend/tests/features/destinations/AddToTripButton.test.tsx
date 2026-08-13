@@ -2,19 +2,19 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { AuthProvider } from '../../auth/AuthContext';
-import { httpError } from '../../test/http';
-import { AddToTripButton } from './AddToTripButton';
-import type { AttractionSummary, TripDetail, TripSummary, User } from '../../types';
+import { AuthProvider } from '../../../src/auth/AuthContext';
+import { httpError } from '../../http';
+import { AddToTripButton } from '../../../src/features/destinations/AddToTripButton';
+import type { AttractionSummary, TripDetail, TripSummary, User } from '../../../src/types';
 
-vi.mock('../../api/auth', () => ({
+vi.mock('../../../src/api/auth', () => ({
   login: vi.fn(),
   register: vi.fn(),
   verifyEmail: vi.fn(),
   resendVerificationEmail: vi.fn(),
 }));
 
-vi.mock('../../api/trips', () => ({
+vi.mock('../../../src/api/trips', () => ({
   getMyTrips: vi.fn(),
   getTrip: vi.fn(),
   createTrip: vi.fn(),
@@ -24,7 +24,7 @@ vi.mock('../../api/trips', () => ({
   removeDestination: vi.fn(),
 }));
 
-import * as tripsApi from '../../api/trips';
+import * as tripsApi from '../../../src/api/trips';
 
 const attraction: AttractionSummary = {
   providerId: 'geo-123',

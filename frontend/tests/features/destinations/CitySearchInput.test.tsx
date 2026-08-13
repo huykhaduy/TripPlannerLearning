@@ -1,16 +1,16 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { CitySearchInput } from './CitySearchInput';
-import type { LocationSuggestion } from '../../types';
+import { CitySearchInput } from '../../../src/features/destinations/CitySearchInput';
+import type { LocationSuggestion } from '../../../src/types';
 
-vi.mock('../../api/destinations', () => ({
+vi.mock('../../../src/api/destinations', () => ({
   searchLocations: vi.fn(),
   getAttractions: vi.fn(),
   getDestinationDetails: vi.fn(),
 }));
 
-import * as destinationsApi from '../../api/destinations';
+import * as destinationsApi from '../../../src/api/destinations';
 
 const paris: LocationSuggestion = { name: 'Paris', country: 'France', latitude: 48.85, longitude: 2.35 };
 const parisot: LocationSuggestion = { name: 'Parisot', country: 'France', latitude: 44.26, longitude: 1.86 };

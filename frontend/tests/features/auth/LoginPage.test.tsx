@@ -2,19 +2,19 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { AuthProvider } from '../../auth/AuthContext';
-import { httpError } from '../../test/http';
-import { LoginPage } from './LoginPage';
-import type { AuthResponse, User } from '../../types';
+import { AuthProvider } from '../../../src/auth/AuthContext';
+import { httpError } from '../../http';
+import { LoginPage } from '../../../src/features/auth/LoginPage';
+import type { AuthResponse, User } from '../../../src/types';
 
-vi.mock('../../api/auth', () => ({
+vi.mock('../../../src/api/auth', () => ({
   login: vi.fn(),
   register: vi.fn(),
   verifyEmail: vi.fn(),
   resendVerificationEmail: vi.fn(),
 }));
 
-import * as authApi from '../../api/auth';
+import * as authApi from '../../../src/api/auth';
 
 const user: User = {
   id: '11111111-1111-1111-1111-111111111111',

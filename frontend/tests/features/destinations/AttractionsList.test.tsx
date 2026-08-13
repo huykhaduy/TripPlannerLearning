@@ -2,24 +2,24 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { AuthProvider } from '../../auth/AuthContext';
-import { AttractionsList } from './AttractionsList';
-import type { AttractionSummary, LocationSuggestion } from '../../types';
+import { AuthProvider } from '../../../src/auth/AuthContext';
+import { AttractionsList } from '../../../src/features/destinations/AttractionsList';
+import type { AttractionSummary, LocationSuggestion } from '../../../src/types';
 
-vi.mock('../../api/destinations', () => ({
+vi.mock('../../../src/api/destinations', () => ({
   searchLocations: vi.fn(),
   getAttractions: vi.fn(),
   getDestinationDetails: vi.fn(),
 }));
 
-vi.mock('../../api/auth', () => ({
+vi.mock('../../../src/api/auth', () => ({
   login: vi.fn(),
   register: vi.fn(),
   verifyEmail: vi.fn(),
   resendVerificationEmail: vi.fn(),
 }));
 
-vi.mock('../../api/trips', () => ({
+vi.mock('../../../src/api/trips', () => ({
   getMyTrips: vi.fn(),
   getTrip: vi.fn(),
   createTrip: vi.fn(),
@@ -29,7 +29,7 @@ vi.mock('../../api/trips', () => ({
   removeDestination: vi.fn(),
 }));
 
-import * as destinationsApi from '../../api/destinations';
+import * as destinationsApi from '../../../src/api/destinations';
 
 const paris: LocationSuggestion = { name: 'Paris', country: 'France', latitude: 48.85, longitude: 2.35 };
 const rome: LocationSuggestion = { name: 'Rome', country: 'Italy', latitude: 41.9, longitude: 12.5 };

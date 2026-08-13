@@ -2,11 +2,11 @@ import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { httpError, networkError } from '../../test/http';
-import { TripDetailPage } from './TripDetailPage';
-import type { ItineraryDay, TripDestination, TripDetail } from '../../types';
+import { httpError, networkError } from '../../http';
+import { TripDetailPage } from '../../../src/features/trips/TripDetailPage';
+import type { ItineraryDay, TripDestination, TripDetail } from '../../../src/types';
 
-vi.mock('../../api/trips', () => ({
+vi.mock('../../../src/api/trips', () => ({
   getMyTrips: vi.fn(),
   getTrip: vi.fn(),
   createTrip: vi.fn(),
@@ -16,7 +16,7 @@ vi.mock('../../api/trips', () => ({
   removeDestination: vi.fn(),
 }));
 
-import * as tripsApi from '../../api/trips';
+import * as tripsApi from '../../../src/api/trips';
 
 const TRIP_ID = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
 

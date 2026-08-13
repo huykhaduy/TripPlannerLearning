@@ -1,18 +1,18 @@
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { AuthProvider } from '../../auth/AuthContext';
-import { httpError, networkError } from '../../test/http';
-import { DestinationDetailsPage } from './DestinationDetailsPage';
-import type { DestinationDetails } from '../../types';
+import { AuthProvider } from '../../../src/auth/AuthContext';
+import { httpError, networkError } from '../../http';
+import { DestinationDetailsPage } from '../../../src/features/destinations/DestinationDetailsPage';
+import type { DestinationDetails } from '../../../src/types';
 
-vi.mock('../../api/destinations', () => ({
+vi.mock('../../../src/api/destinations', () => ({
   searchLocations: vi.fn(),
   getAttractions: vi.fn(),
   getDestinationDetails: vi.fn(),
 }));
 
-vi.mock('../../api/auth', () => ({
+vi.mock('../../../src/api/auth', () => ({
   login: vi.fn(),
   register: vi.fn(),
   verifyEmail: vi.fn(),
@@ -20,7 +20,7 @@ vi.mock('../../api/auth', () => ({
 }));
 
 // The page renders AddToTripButton, which loads the user's trips.
-vi.mock('../../api/trips', () => ({
+vi.mock('../../../src/api/trips', () => ({
   getMyTrips: vi.fn(),
   getTrip: vi.fn(),
   createTrip: vi.fn(),
@@ -30,8 +30,8 @@ vi.mock('../../api/trips', () => ({
   removeDestination: vi.fn(),
 }));
 
-import * as destinationsApi from '../../api/destinations';
-import * as tripsApi from '../../api/trips';
+import * as destinationsApi from '../../../src/api/destinations';
+import * as tripsApi from '../../../src/api/trips';
 
 const details: DestinationDetails = {
   providerId: 'geo-123',

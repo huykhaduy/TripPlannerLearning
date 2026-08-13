@@ -2,11 +2,11 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { httpError } from '../../test/http';
-import { TripsPage } from './TripsPage';
-import type { TripSummary } from '../../types';
+import { httpError } from '../../http';
+import { TripsPage } from '../../../src/features/trips/TripsPage';
+import type { TripSummary } from '../../../src/types';
 
-vi.mock('../../api/trips', () => ({
+vi.mock('../../../src/api/trips', () => ({
   getMyTrips: vi.fn(),
   getTrip: vi.fn(),
   createTrip: vi.fn(),
@@ -16,7 +16,7 @@ vi.mock('../../api/trips', () => ({
   removeDestination: vi.fn(),
 }));
 
-import * as tripsApi from '../../api/trips';
+import * as tripsApi from '../../../src/api/trips';
 
 function trip(overrides: Partial<TripSummary> = {}): TripSummary {
   return {

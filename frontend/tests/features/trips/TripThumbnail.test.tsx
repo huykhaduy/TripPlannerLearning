@@ -1,6 +1,6 @@
 import { fireEvent, render } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import { TripThumbnail, formatDates } from './TripThumbnail';
+import { TripThumbnail, formatDates } from '../../../src/features/trips/TripThumbnail';
 
 /**
  * The cover photo is decorative (alt=""), so it is deliberately absent from the
