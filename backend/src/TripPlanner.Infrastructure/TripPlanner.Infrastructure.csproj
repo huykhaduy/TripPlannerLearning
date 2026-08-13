@@ -10,6 +10,16 @@
     <ProjectReference Include="..\TripPlanner.Application\TripPlanner.Application.csproj" />
   </ItemGroup>
 
+  <!--
+    ResilientDistributedCache is internal on purpose: it is a decorator wired up
+    inside AddInfrastructure, and nothing outside this assembly should construct
+    or name it. Its whole contract is what it swallows versus what it lets
+    through, which is only observable by calling it directly — hence this.
+  -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="TripPlanner.Application.Tests" />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.9" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.9" />
