@@ -77,7 +77,12 @@ public class ExceptionHandlingMiddleware
         }
 
         context.Response.StatusCode = (int)status;
-        context.Response.ContentType = "application/problem+json";
-        await context.Response.WriteAsJsonAsync(problem);
+
+        // The content type has to be passed to WriteAsJsonAsync, not assigned
+        // beforehand: WriteAsJsonAsync always sets Response.ContentType itself and
+        // would overwrite an earlier assignment with "application/json", quietly
+        // dropping the RFC 7807 media type these responses are shaped for.
+        await context.Response.WriteAsJsonAsync(
+            problem, options: null, contentType: "application/problem+json");
     }
 }
