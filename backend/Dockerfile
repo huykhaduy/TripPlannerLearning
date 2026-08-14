@@ -1,4 +1,6 @@
-# Build context: backend/ (Coolify "Base Directory" = backend)
+# Build context: backend/ — supplied by docker-compose.deploy.yml, which sets
+# `context: ./backend` from the repo root. Coolify's "Base Directory" is therefore "/",
+# not "backend"; see docs/deployment-coolify.md.
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
@@ -17,6 +19,14 @@ RUN dotnet publish src/TripPlanner.WebApi/TripPlanner.WebApi.csproj \
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
 WORKDIR /app
+
+# Solely so docker-compose.deploy.yml's healthcheck has something to run: the aspnet
+# runtime image ships neither curl nor wget. ~5MB; the list cleanup keeps it there.
+# If the /health healthcheck is ever dropped, drop this too.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY --from=build /app/publish .
 
 # Coolify routes traffic to this port; TLS termination happens upstream
