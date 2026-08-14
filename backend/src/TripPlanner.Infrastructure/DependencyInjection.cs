@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using TripPlanner.Application.Common.Interfaces;
 using TripPlanner.Infrastructure.Caching;
+using TripPlanner.Infrastructure.Configuration;
 using TripPlanner.Infrastructure.Email;
 using TripPlanner.Infrastructure.ExternalApis;
 using TripPlanner.Infrastructure.Identity;

@@ -165,6 +165,37 @@ All three are fully implemented (Auth is the canonical worked example to study f
 
 Each feature folder holds: the service implementation, an interface, and a `Dtos/` subfolder.
 
+**Where an interface goes** — there are two locations and the rule is the *consumer*, not
+the kind of type:
+
+- `Features/<Feature>/I<Feature>Service.cs` — **inbound** use-case interfaces, beside their
+  one implementation. The controller is the only caller and the pair is read together.
+- `Common/Interfaces/` — **outbound ports** the Application layer defines for someone else to
+  implement (`IUserRepository`, `ITripRepository`, `IDestinationRepository`,
+  `IDestinationProvider`, `IImageSearchProvider`, `IEmailSender`, `IPasswordHasher`,
+  `IJwtTokenGenerator`, `ICurrentUserService`, `IAppUrlProvider`). These are the dependency
+  inversion boundary, so they sit together where that boundary is easy to see and audit.
+
+Corollaries worth stating, because both were violated once: `Common/Interfaces/` holds
+**only** interfaces — a helper class goes in `Common/Extensions/` (that is why
+`CurrentUserServiceExtensions` lives there, not next to `ICurrentUserService`). And these
+interfaces carry **no default implementations**: `ICurrentUserService` had an unused
+`IsAuthenticated => UserId is not null` body, which put logic in a port and was dead besides.
+Behaviour over a port belongs in an extension method, where `GetRequiredUserId` already is.
+
+**A file's name must predict the types in it.** Two allowed shapes, nothing else:
+
+- one top-level type, in a file named after it — the default for anything with behaviour;
+- several small, closely-related types under a **plural name describing the group** —
+  `AuthDtos.cs` / `TripDtos.cs` / `DestinationDtos.cs` (a feature's request/response records;
+  twenty single-record files would be harder to scan, not easier) and
+  `FakeExternalProviders.cs` in the WebApi tests.
+
+What this rules out is a file named after *one* of the types it contains, which is how
+`ItineraryDayConfiguration` and `ItineraryItemConfiguration` came to be hidden inside
+`TripConfiguration.cs` — unfindable by filename — and how `TripSummaryRow` came to live in
+`TripMappings.cs`. All four now have their own files.
+
 ### Frontend structure
 
 ```
@@ -179,8 +210,9 @@ src/
 tests/         ← mirrors src/ one-for-one, plus setup.ts and http.ts
 ```
 
-Tests live in `tests/`, **not** beside the code — the same split the backend uses
-(`backend/tests` mirrors `backend/src`), so `src/` holds only shipped code. A test for
+Tests live in `tests/`, **not** beside the code — the same `src/`-vs-`tests/` split the
+backend uses, so `src/` holds only shipped code. (The frontend mirror is one-for-one; the
+backend's is *not* — see the xUnit section below, where one project covers three layers.) A test for
 `src/features/trips/TripsPage.tsx` belongs at `tests/features/trips/TripsPage.test.tsx`;
 keep the mirror exact, because `vite.config.ts` pins `include: ['tests/**/*.test.{ts,tsx}']`
 and a test left under `src/` will simply never run.
@@ -266,6 +298,21 @@ DTO consumed by the feature pages — add new shared shapes here rather than dec
 ad-hoc inline interfaces in components.
 
 ### Testing pattern (xUnit)
+
+There are **two** test projects, split by what they need to run rather than by which layer
+they cover:
+
+- `tests/TripPlanner.UnitTests` — everything that runs in-process with no host. Despite
+  living next to `src/`, it does **not** mirror it one-for-one: it covers Domain
+  (`DomainRules/`), Application (`Auth/`, `Common/`, `Destinations/`, `Trips/`) **and**
+  Infrastructure (`Identity/`, `Infrastructure/`, `Persistence/`) in one project, because
+  they share the same fixtures and need no web host. It was named
+  `TripPlanner.Application.Tests`, which claimed one layer while covering three.
+- `tests/TripPlanner.WebApi.Tests` — `WebApplicationFactory` integration tests (see below).
+
+`TripPlanner.Infrastructure.csproj` grants `InternalsVisibleTo` to `TripPlanner.UnitTests`
+(for `ResilientDistributedCache`), so renaming that project again means updating the csproj
+and `TripPlanner.sln` alongside the namespaces.
 
 Tests use an **in-memory EF Core database** (new `Guid` database name per test) and **Moq** for interfaces. See `AuthServiceTests.cs` as the reference:
 

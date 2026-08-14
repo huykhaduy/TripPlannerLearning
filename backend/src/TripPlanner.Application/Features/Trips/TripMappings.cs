@@ -5,13 +5,6 @@ using TripPlanner.Domain.Entities;
 namespace TripPlanner.Application.Features.Trips;
 
 /// <summary>
-/// Query row for the trip list: the summary DTO plus <c>CreatedAt</c>, which is
-/// needed only for ordering — the list query fetches this row and sorts in
-/// memory instead of via SQL ORDER BY.
-/// </summary>
-public sealed record TripSummaryRow(DateTimeOffset CreatedAt, TripSummaryDto Summary);
-
-/// <summary>
 /// Entity → DTO mapping for the Trips feature — the single source of truth for
 /// what a trip looks like on the wire. Two forms of the same mapping:
 ///   * <see cref="ToSummaryRowExpression"/> for EF queries (translated to SQL,

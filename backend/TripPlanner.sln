@@ -11,7 +11,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TripPlanner.Infrastructure"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TripPlanner.WebApi", "src\TripPlanner.WebApi\TripPlanner.WebApi.csproj", "{2800F585-E53A-44D6-93BD-846B9C787D80}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TripPlanner.Application.Tests", "tests\TripPlanner.Application.Tests\TripPlanner.Application.Tests.csproj", "{09F04993-82C5-4AED-AB56-4357AC4B0BFC}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TripPlanner.UnitTests", "tests\TripPlanner.UnitTests\TripPlanner.UnitTests.csproj", "{09F04993-82C5-4AED-AB56-4357AC4B0BFC}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{0AB3BF05-4346-4AA6-1389-037BE0695223}"
 EndProject

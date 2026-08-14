@@ -10,6 +10,4 @@ public interface ICurrentUserService
 {
     /// <summary>The authenticated user's id, or <c>null</c> when anonymous.</summary>
     Guid? UserId { get; }
-
-    bool IsAuthenticated => UserId is not null;
 }

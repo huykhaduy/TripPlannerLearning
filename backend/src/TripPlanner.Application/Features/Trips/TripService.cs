@@ -1,4 +1,5 @@
 using TripPlanner.Application.Common.Exceptions;
+using TripPlanner.Application.Common.Extensions;
 using TripPlanner.Application.Common.Interfaces;
 using TripPlanner.Application.Common.Validation;
 using TripPlanner.Application.Features.Destinations;

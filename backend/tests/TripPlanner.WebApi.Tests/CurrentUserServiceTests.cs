@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Http;
 using TripPlanner.Application.Common.Exceptions;
+using TripPlanner.Application.Common.Extensions;
 using TripPlanner.Application.Common.Interfaces;
 using TripPlanner.WebApi.Services;
 using Xunit;

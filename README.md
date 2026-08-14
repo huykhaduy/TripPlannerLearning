@@ -35,7 +35,8 @@ backend/                         ← ASP.NET Core solution (TripPlanner.sln)
     TripPlanner.Infrastructure   ← EF Core, JWT, BCrypt, external APIs. Implements Application interfaces.
     TripPlanner.WebApi           ← Controllers, DI, middleware. The composition root.
   tests/
-    TripPlanner.Application.Tests ← xUnit tests (Auth slice covered as an example).
+    TripPlanner.UnitTests        ← xUnit tests for Domain, Application and Infrastructure.
+    TripPlanner.WebApi.Tests     ← WebApplicationFactory integration tests (routing, auth, error mapping).
 frontend/                        ← React + TypeScript app (Vite).
 ```
 

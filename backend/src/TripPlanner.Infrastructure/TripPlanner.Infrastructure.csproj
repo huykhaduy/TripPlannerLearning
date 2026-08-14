@@ -17,7 +17,7 @@
     through, which is only observable by calling it directly — hence this.
   -->
   <ItemGroup>
-    <InternalsVisibleTo Include="TripPlanner.Application.Tests" />
+    <InternalsVisibleTo Include="TripPlanner.UnitTests" />
   </ItemGroup>
 
   <ItemGroup>
