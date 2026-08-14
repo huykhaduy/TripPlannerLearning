@@ -86,15 +86,14 @@ for both to report healthy before starting `api`. EF Core migrations apply on st
 
 The public domain is on the resource page once the deploy finishes.
 
-**On the very first deploy only**, expect to see `api` restart once. `postgres`'s
-healthcheck (`pg_isready -U tripplanner`) connects over the Unix socket, but on a first
-boot Postgres's own bootstrap (`initdb`) briefly runs a temporary server on that same
-socket before the real one comes up — so `depends_on: service_healthy` can release `api`
-a moment too early. The API then fails its first migration connection attempt and
-restarts. This self-heals well inside the healthcheck's retry budget and only happens
-once, on the deploy that first creates `tripplanner-pgdata` — if you're watching that
-first deploy and see one `api` restart, that is expected, not a misconfiguration. Later
-deploys, against an already-initialized volume, don't hit it.
+`postgres`'s healthcheck (`pg_isready -h localhost -U tripplanner`) deliberately forces a
+TCP connection instead of the Unix socket. On a first boot, Postgres's own bootstrap
+(`initdb`) briefly runs a temporary server on that socket before the real one comes up;
+a socket-based check could pass against that temporary server and let `depends_on:
+service_healthy` release `api` before Postgres is really accepting connections. The
+`-h localhost` check cannot succeed until the real TCP listener is up, so `api` is only
+started once Postgres is genuinely ready. A repeated `api` restart on first deploy is
+therefore **not** expected — treat it as worth investigating, not something to wait out.
 
 ## 5. Verify
 

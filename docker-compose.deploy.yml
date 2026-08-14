@@ -64,7 +64,7 @@ services:
     volumes:
       - tripplanner-pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U tripplanner"]
+      test: ["CMD-SHELL", "pg_isready -h localhost -U tripplanner"]
       interval: 10s
       timeout: 5s
       retries: 5
