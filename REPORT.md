@@ -1026,3 +1026,4 @@ instance khởi động cùng lúc có thể cùng chạy migration.
 
 Access token hết hạn (mặc định 60 phút) thì user phải đăng nhập lại. Frontend đã xử lý chuyện này
 tử tế (interceptor phát hiện 401 → tự logout → redirect), nhưng chưa có luồng gia hạn im lặng.
+
