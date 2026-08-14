@@ -30,6 +30,13 @@ builder.Services.AddWebApi();
 
 builder.Services.AddControllers();
 
+// Liveness for the container orchestrator. No database probe on purpose: migrations
+// are applied before app.Run() below, so the app answers no HTTP at all until they
+// have finished — a plain 200 here already means "migrated and serving", which is the
+// only question Coolify asks. A DbContextCheck would add a NuGet package to report
+// something the next real request reports anyway.
+builder.Services.AddHealthChecks();
+
 // ---------------------------------------------------------------------------
 // 2. Authentication — validate the JWTs issued by JwtTokenGenerator.
 // ---------------------------------------------------------------------------
@@ -126,6 +133,11 @@ app.UseCors(CorsPolicy);
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
+
+// Anonymous by design — the healthcheck in docker-compose.deploy.yml runs curl from
+// inside the container and has no token. The body is the literal string "Healthy" and
+// discloses nothing else. Outside /api, so it cannot collide with a controller route.
+app.MapHealthChecks("/health");
 
 app.Run();
 
