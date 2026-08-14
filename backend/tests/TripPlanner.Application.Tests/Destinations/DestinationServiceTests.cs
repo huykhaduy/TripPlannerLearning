@@ -245,7 +245,7 @@ public class DestinationServiceTests
         var provider = new Mock<IDestinationProvider>();
         provider
             .Setup(p => p.GetDestinationDetailsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new HttpRequestException("simulated outage"));
+            .ThrowsAsync(new ExternalServiceUnavailableException("simulated outage", new Exception()));
         return provider;
     }
 
@@ -473,7 +473,7 @@ public class DestinationServiceTests
         provider
             .SetupSequence(p => p.SearchLocationsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync([Suggestion("Paris", "France")])
-            .ThrowsAsync(new HttpRequestException("simulated outage"));
+            .ThrowsAsync(new ExternalServiceUnavailableException("simulated outage", new Exception()));
         var sut = CreateSut(CreateDb(), provider, clock);
 
         await sut.SearchLocationsAsync("paris");
@@ -494,7 +494,7 @@ public class DestinationServiceTests
         provider
             .SetupSequence(p => p.GetDestinationDetailsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(details)
-            .ThrowsAsync(new HttpRequestException("simulated outage"));
+            .ThrowsAsync(new ExternalServiceUnavailableException("simulated outage", new Exception()));
         // Empty DB: if the stale entry were not served, this would be a 404.
         var sut = CreateSut(CreateDb(), provider, clock);
 
@@ -509,16 +509,22 @@ public class DestinationServiceTests
     [Fact]
     public async Task SearchLocationsAsync_ExpiredEntryAndProviderTimesOut_ServesStaleResult()
     {
-        // Regression test: GetCachedAsync used to only catch HttpRequestException,
-        // so a provider TIMEOUT (TaskCanceledException) would crash the request
-        // instead of degrading to the stale entry like every other transient
-        // failure mode does.
+        // Regression test: GetCachedAsync used to only catch HttpRequestException, so a
+        // provider TIMEOUT would crash the request instead of degrading to the stale
+        // entry like every other transient failure mode does.
+        //
+        // That guarantee is now pinned in two halves, because a timeout no longer
+        // reaches this layer as TaskCanceledException: GeoapifyClientTests
+        // (ATimeoutIsLoggedAndRethrown) pins "a timeout is reported as
+        // ExternalServiceUnavailableException", and this test pins "that is answered
+        // with the stale entry". Both halves have to hold for the behaviour to survive.
         var clock = new FakeClock();
         var provider = new Mock<IDestinationProvider>();
         provider
             .SetupSequence(p => p.SearchLocationsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync([Suggestion("Paris", "France")])
-            .ThrowsAsync(new TaskCanceledException("simulated timeout"));
+            .ThrowsAsync(new ExternalServiceUnavailableException(
+                "simulated timeout", new TaskCanceledException()));
         var sut = CreateSut(CreateDb(), provider, clock);
 
         await sut.SearchLocationsAsync("paris");
@@ -543,7 +549,7 @@ public class DestinationServiceTests
         var imageSearch = new Mock<IImageSearchProvider>();
         imageSearch
             .SetupSequence(p => p.SearchImagesAsync("Golden Bridge", It.IsAny<int>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new HttpRequestException("simulated outage"))
+            .ThrowsAsync(new ExternalServiceUnavailableException("simulated outage", new Exception()))
             .ReturnsAsync((IReadOnlyList<string>)["fresh.jpg"]);
         var sut = CreateSut(CreateDb(), ProviderReturning(details), imageSearch: imageSearch);
 

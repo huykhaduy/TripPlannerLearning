@@ -14,7 +14,7 @@ public class TripRepository : ITripRepository
         _context = context;
     }
 
-    public async Task<List<TripSummaryRow>> GetSummaryRowsForUserAsync(Guid userId, CancellationToken cancellationToken = default) =>
+    public async Task<IReadOnlyList<TripSummaryRow>> GetSummaryRowsForUserAsync(Guid userId, CancellationToken cancellationToken = default) =>
         await _context.Trips
             .AsNoTracking()
             .Where(t => t.UserId == userId)

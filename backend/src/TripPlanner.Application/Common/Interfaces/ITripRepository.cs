@@ -12,7 +12,7 @@ namespace TripPlanner.Application.Common.Interfaces;
 public interface ITripRepository
 {
     /// <summary>Projected list rows for GetMyTripsAsync — see TripMappings.ToSummaryRowExpression.</summary>
-    Task<List<TripSummaryRow>> GetSummaryRowsForUserAsync(Guid userId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<TripSummaryRow>> GetSummaryRowsForUserAsync(Guid userId, CancellationToken cancellationToken = default);
 
     /// <summary>Read-only, full graph (Days.Items.Destination + Items.Destination) — for GetTripAsync.</summary>
     Task<Trip?> GetDetailsAsync(Guid tripId, Guid userId, CancellationToken cancellationToken = default);

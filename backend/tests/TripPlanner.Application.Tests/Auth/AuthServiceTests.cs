@@ -100,7 +100,10 @@ public class AuthServiceTests
         var emailSender = new Mock<IEmailSender>();
         emailSender
             .Setup(e => e.SendAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new System.Net.Mail.SmtpException("simulated SMTP outage"));
+            // The Application-layer type every IEmailSender reports an outage as — not
+            // SmtpException, which would only exercise the SMTP implementation's shape.
+            .ThrowsAsync(new ExternalServiceUnavailableException(
+                "simulated mail outage", new Exception("relay unreachable")));
         var sut = CreateSut(db, emailSender: emailSender);
 
         var result = await sut.RegisterAsync(new RegisterRequest("new@example.com", "password123", null));

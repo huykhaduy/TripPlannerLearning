@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
+using TripPlanner.Application.Common.Exceptions;
 using TripPlanner.Application.Tests.TestDoubles;
 using TripPlanner.Infrastructure.ExternalApis;
 using Xunit;
@@ -152,7 +153,7 @@ public class SerperImageClientTests
         var logger = new RecordingLogger<SerperImageClient>();
         var handler = StubHttpMessageHandler.Throwing(new HttpRequestException("connection refused"));
 
-        await Assert.ThrowsAsync<HttpRequestException>(
+        await Assert.ThrowsAsync<ExternalServiceUnavailableException>(
             () => CreateSut(handler, logger).SearchImagesAsync("citadel", 1));
 
         Assert.Contains("citadel", Assert.Single(logger.Warnings).Message);
@@ -164,7 +165,7 @@ public class SerperImageClientTests
         var logger = new RecordingLogger<SerperImageClient>();
         var handler = StubHttpMessageHandler.ReturningStatus(HttpStatusCode.TooManyRequests);
 
-        await Assert.ThrowsAsync<HttpRequestException>(
+        await Assert.ThrowsAsync<ExternalServiceUnavailableException>(
             () => CreateSut(handler, logger).SearchImagesAsync("citadel", 1));
 
         Assert.Single(logger.Warnings);
@@ -176,7 +177,7 @@ public class SerperImageClientTests
         var logger = new RecordingLogger<SerperImageClient>();
         var handler = StubHttpMessageHandler.Returning("not json at all");
 
-        await Assert.ThrowsAsync<JsonException>(
+        await Assert.ThrowsAsync<ExternalServiceUnavailableException>(
             () => CreateSut(handler, logger).SearchImagesAsync("citadel", 1));
 
         Assert.Single(logger.Warnings);

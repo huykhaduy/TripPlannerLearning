@@ -103,8 +103,10 @@ public class DestinationService : IDestinationService
     /// <see cref="CacheRetention"/> is 7 days, long enough for a student to
     /// reshape a DTO in <c>Features/Destinations/Dtos/</c> between restarts,
     /// so a stale entry that no longer matches the current shape must not
-    /// 500 the request — same treatment <see cref="IsTransientExternalFailure"/>
-    /// already gives <see cref="JsonException"/> elsewhere in this file.
+    /// 500 the request. This is the one place JSON is still handled here, and
+    /// legitimately so: the envelope is this project's own contract, unlike a
+    /// provider's response body, which its adapter now reports as
+    /// <see cref="ExternalServiceUnavailableException"/>.
     /// Deliberately NOT applied in <see cref="SetCachedEnvelopeAsync{T}"/>: a
     /// serialize failure on write is a real bug and should surface, not be
     /// swallowed.
@@ -153,6 +155,10 @@ public class DestinationService : IDestinationService
     /// Cache-aside over the provider (NFR1/NFR2): fresh hit → no provider
     /// call; miss/expired → fetch and re-cache; provider down but a stale
     /// entry exists → serve it rather than fail (spec §11.2).
+    ///
+    /// Only an adapter-reported outage falls back. A serialize failure inside
+    /// <see cref="SetCachedEnvelopeAsync{T}"/> now surfaces as the bug it is, instead
+    /// of being mistaken for a provider failure and answered with stale data.
     /// </summary>
     private async Task<T> GetCachedAsync<T>(string key, TimeSpan ttl, Func<Task<T>> fetchAsync, CancellationToken cancellationToken)
     {
@@ -168,7 +174,7 @@ public class DestinationService : IDestinationService
             await SetCachedEnvelopeAsync(key, new CacheEnvelope<T>(value, _clock.GetUtcNow()), cancellationToken);
             return value;
         }
-        catch (Exception ex) when (IsTransientExternalFailure(ex) && !cancellationToken.IsCancellationRequested && stale is not null)
+        catch (ExternalServiceUnavailableException) when (stale is not null)
         {
             return stale.Value; // stale-better-than-down
         }
@@ -298,7 +304,7 @@ public class DestinationService : IDestinationService
             images = await _imageSearch.SearchImagesAsync(name, DetailsPhotoCount, cancellationToken);
             searchSucceeded = true;
         }
-        catch (Exception ex) when (IsTransientExternalFailure(ex) && !cancellationToken.IsCancellationRequested)
+        catch (ExternalServiceUnavailableException)
         {
             // Serper down, timed out, or returned something unparseable — fall
             // through to the next source rather than failing the whole list/page.
@@ -339,18 +345,6 @@ public class DestinationService : IDestinationService
     }
 
     /// <summary>
-    /// True for the external-call failure modes we treat as "this source
-    /// didn't come through" rather than "the whole request must fail":
-    /// connection failures, HttpClient timeouts (which surface as
-    /// TaskCanceledException, not HttpRequestException), and a response body
-    /// that doesn't deserialize as expected. Excludes a genuine caller-driven
-    /// cancellation, which should propagate rather than be swallowed as
-    /// "no result".
-    /// </summary>
-    private static bool IsTransientExternalFailure(Exception ex) =>
-        ex is HttpRequestException or TaskCanceledException or JsonException;
-
-    /// <summary>
     /// Cache-aside fetch of one place's details, shared by <see cref="GetDetailsAsync"/>
     /// and the attractions-list image enrichment above — a place looked up during
     /// enrichment is already cached by the time the user clicks into its detail page.
@@ -371,7 +365,7 @@ public class DestinationService : IDestinationService
         {
             details = await _provider.GetDestinationDetailsAsync(providerId, cancellationToken);
         }
-        catch (Exception ex) when (IsTransientExternalFailure(ex) && !cancellationToken.IsCancellationRequested)
+        catch (ExternalServiceUnavailableException)
         {
             return stale?.Value; // stale-better-than-down (spec §11.2), else null
         }

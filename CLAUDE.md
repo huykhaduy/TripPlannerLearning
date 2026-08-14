@@ -112,6 +112,25 @@ WebApi ──▶ Application ──▶ Domain
   at the Application level. `DestinationService` holds the only `ILogger` in Application, for the
   one failure that originates in this layer rather than an adapter: a cached entry that no longer
   matches its DTO shape.
+- **Adapters translate their failures into `ExternalServiceUnavailableException`**: the three
+  outbound adapters do not rethrow the *raw* failure — they log it, then throw the Application-owned
+  `ExternalServiceUnavailableException` (`Common/Exceptions/`) with the original as `InnerException`.
+  The Application layer catches only that type, so no service names `SmtpException`,
+  `HttpRequestException`, `TaskCanceledException` or `JsonException`. This is the point: catching
+  `SmtpException` in `AuthService` made the F4/US1 "registration survives a mail outage" guarantee
+  hold only while `IEmailSender` happened to speak SMTP, and it was the reason the same
+  three-type predicate was copy-pasted into `AuthService`, `DestinationService` and `TripService`.
+  Adapters translate **only when their own `CancellationToken` was not the cause**, so a
+  caller-driven cancellation still propagates as `TaskCanceledException` and is never mistaken for
+  an outage — that split is what the "cancelled request is not a provider failure" adapter tests
+  pin. Like `ConcurrencyException`, this type is deliberately **not** mapped by
+  `ExceptionHandlingMiddleware`: a service with a fallback (stale cache entry; save the destination
+  without a photo) catches it, and anywhere else it is a genuine 500. Two knock-on rules: JSON
+  handling in `DestinationService` is now *only* for its own cache envelope (a provider's
+  unparseable body is the adapter's problem), and a serialize failure in `SetCachedEnvelopeAsync`
+  now surfaces as the bug it is instead of being mistaken for a provider outage and answered with
+  stale data. When you add an outbound adapter, translate in it; do not teach Application a new
+  technology's exception type.
 - **Reference slice**: `AuthService.cs` + `AuthController.cs` are the canonical worked example. Study them before implementing other features.
 - **Destination caching**: `Destination` rows are a cache of external-provider data (Geoapify), keyed by a unique index on `ProviderId` (`DestinationConfiguration.cs`). `DestinationService` (search/details) never persists rows — only `TripService.AddDestinationAsync` upserts one, on first add to any trip. Do not reintroduce a "must already exist" lookup there; a fresh `ProviderId` is expected and should upsert, not 404. `ProviderId` is unbounded `text` **by design**: a Geoapify `place_id` is a ~68-char prefix plus the hex-encoded UTF-8 place name (2 id chars per name byte), so real ids run 62–328 chars and the original `varchar(128)` made add-to-trip 500 (Postgres `22001`) for any long or non-Latin name. Never restore a `HasMaxLength` here, and never cap it in the validators (that would reject legitimate places). EF InMemory ignores `HasMaxLength`, so no behavioural test can catch a regression — `DestinationConfigurationTests` pins the absence via model metadata instead.
 - **Entities supply their own keys**: `BaseEntity` self-assigns `Id = Guid.NewGuid()`, so all five

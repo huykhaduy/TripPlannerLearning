@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
+using TripPlanner.Application.Common.Exceptions;
 using TripPlanner.Application.Tests.TestDoubles;
 using TripPlanner.Infrastructure.ExternalApis;
 using Xunit;
@@ -294,7 +295,7 @@ public class GeoapifyClientTests
         // broken deployment as "we could not find that destination".
         var handler = StubHttpMessageHandler.ReturningStatus(HttpStatusCode.Unauthorized);
 
-        await Assert.ThrowsAsync<HttpRequestException>(
+        await Assert.ThrowsAsync<ExternalServiceUnavailableException>(
             () => CreateSut(handler).GetDestinationDetailsAsync("geo-1"));
     }
 
@@ -346,7 +347,7 @@ public class GeoapifyClientTests
         var logger = new RecordingLogger<GeoapifyClient>();
         var handler = StubHttpMessageHandler.Throwing(new HttpRequestException("connection refused"));
 
-        await Assert.ThrowsAsync<HttpRequestException>(
+        await Assert.ThrowsAsync<ExternalServiceUnavailableException>(
             () => CreateSut(handler, logger).SearchLocationsAsync("hanoi"));
 
         var warning = Assert.Single(logger.Warnings);
@@ -362,7 +363,7 @@ public class GeoapifyClientTests
         var logger = new RecordingLogger<GeoapifyClient>();
         var handler = StubHttpMessageHandler.Throwing(new TaskCanceledException("timed out"));
 
-        await Assert.ThrowsAsync<TaskCanceledException>(
+        await Assert.ThrowsAsync<ExternalServiceUnavailableException>(
             () => CreateSut(handler, logger).GetAttractionsAsync(21, 105, 5));
 
         Assert.Contains("attractions lookup", Assert.Single(logger.Warnings).Message);
@@ -374,7 +375,7 @@ public class GeoapifyClientTests
         var logger = new RecordingLogger<GeoapifyClient>();
         var handler = StubHttpMessageHandler.Returning("this is not json");
 
-        await Assert.ThrowsAsync<JsonException>(
+        await Assert.ThrowsAsync<ExternalServiceUnavailableException>(
             () => CreateSut(handler, logger).GetDestinationDetailsAsync("geo-1"));
 
         Assert.Contains("place details", Assert.Single(logger.Warnings).Message);
@@ -386,7 +387,7 @@ public class GeoapifyClientTests
         var logger = new RecordingLogger<GeoapifyClient>();
         var handler = StubHttpMessageHandler.Throwing(new HttpRequestException("boom"));
 
-        await Assert.ThrowsAsync<HttpRequestException>(
+        await Assert.ThrowsAsync<ExternalServiceUnavailableException>(
             () => CreateSut(handler, logger).SearchLocationsAsync("hanoi"));
 
         Assert.DoesNotContain(logger.Entries, e => e.Message.Contains(ApiKey));

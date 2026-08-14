@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using TripPlanner.Application.Common.Exceptions;
 using TripPlanner.Application.Common.Interfaces;
 using TripPlanner.Application.Features.Destinations.Dtos;
 
@@ -64,17 +65,22 @@ public class GeoapifyClient : IDestinationProvider
     }
 
     /// <summary>
-    /// Logs a transient failure and rethrows — the caller decides the fallback
-    /// (DestinationService serves a stale cache entry when it has one).
+    /// Logs a transient failure and converts it to
+    /// <see cref="ExternalServiceUnavailableException"/> — the caller decides the
+    /// fallback (DestinationService serves a stale cache entry when it has one) and
+    /// must be able to do so without knowing this adapter speaks HTTP and JSON.
     ///
-    /// This has to be explicit rather than relying on HttpClientFactory's built-in
+    /// The log has to be explicit rather than relying on HttpClientFactory's built-in
     /// request logging, because <c>AddInfrastructure</c> calls RemoveAllLoggers()
     /// on this client: Geoapify takes its apiKey as a query-string parameter, and
     /// the default handlers log the full request URI. Without this method a
     /// Geoapify outage is completely invisible.
     /// </summary>
-    private void LogTransientFailure(Exception ex, string operation) =>
+    private ExternalServiceUnavailableException Translate(Exception ex, string operation)
+    {
         _logger.LogWarning(ex, "Geoapify {Operation} failed.", operation);
+        return new ExternalServiceUnavailableException($"Geoapify {operation} failed.", ex);
+    }
 
     /// <summary>
     /// Connection failures, HttpClient timeouts (surfaced as TaskCanceledException,
@@ -100,8 +106,7 @@ public class GeoapifyClient : IDestinationProvider
         }
         catch (Exception ex) when (IsTransientFailure(ex) && !cancellationToken.IsCancellationRequested)
         {
-            LogTransientFailure(ex, "location search");
-            throw;
+            throw Translate(ex, "location search");
         }
 
         if (payload?.Features is null)
@@ -140,8 +145,7 @@ public class GeoapifyClient : IDestinationProvider
         }
         catch (Exception ex) when (IsTransientFailure(ex) && !cancellationToken.IsCancellationRequested)
         {
-            LogTransientFailure(ex, "attractions lookup");
-            throw;
+            throw Translate(ex, "attractions lookup");
         }
 
         if (payload?.Features is null)
@@ -184,8 +188,7 @@ public class GeoapifyClient : IDestinationProvider
         }
         catch (Exception ex) when (IsTransientFailure(ex) && !cancellationToken.IsCancellationRequested)
         {
-            LogTransientFailure(ex, "place details");
-            throw;
+            throw Translate(ex, "place details");
         }
 
         var place = payload?.Features?.FirstOrDefault()?.Properties;

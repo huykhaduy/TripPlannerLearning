@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using TripPlanner.Application.Common.Exceptions;
 using TripPlanner.Application.Common.Interfaces;
 
 namespace TripPlanner.Infrastructure.ExternalApis;
@@ -13,9 +14,11 @@ namespace TripPlanner.Infrastructure.ExternalApis;
 /// in DependencyInjection). Each call spends one paid credit, so callers
 /// should cache results rather than re-query for the same term.
 ///
-/// Transient failures are logged here and then RETHROWN, not swallowed:
+/// Transient failures are logged here and then rethrown as
+/// <see cref="ExternalServiceUnavailableException"/>, not swallowed:
 /// DestinationService distinguishes "the search failed" from "the search found
-/// nothing" when deciding whether to cache the result, so it must still see them.
+/// nothing" when deciding whether to cache the result, so it must still see them —
+/// but as an Application-layer type, not as this adapter's HTTP/JSON exceptions.
 /// </summary>
 public class SerperImageClient : IImageSearchProvider
 {
@@ -60,7 +63,7 @@ public class SerperImageClient : IImageSearchProvider
         catch (Exception ex) when (IsTransientFailure(ex) && !cancellationToken.IsCancellationRequested)
         {
             _logger.LogWarning(ex, "Serper image search failed for {Query}.", query);
-            throw;
+            throw new ExternalServiceUnavailableException("Serper image search failed.", ex);
         }
 
         if (payload?.Images is null)

@@ -1,5 +1,3 @@
-using System.Net.Mail;
-using System.Net.Sockets;
 using TripPlanner.Application.Common.Exceptions;
 using TripPlanner.Application.Common.Interfaces;
 using TripPlanner.Application.Common.Validation;
@@ -160,17 +158,19 @@ public class AuthService : IAuthService
                     + "<p>This link expires in 24 hours.</p>",
                 cancellationToken);
         }
-        catch (Exception ex) when (IsTransientEmailFailure(ex) && !cancellationToken.IsCancellationRequested)
+        catch (ExternalServiceUnavailableException)
         {
             // F4/US1: the account still exists and resending is a separate,
             // retryable step, so a mail outage must not fail registration.
             // Already logged by the IEmailSender implementation — swallowing the
             // exception here loses no diagnostic information.
+            //
+            // Catching the Application-layer type rather than SmtpException keeps this
+            // guarantee true for any IEmailSender: the previous version only held while
+            // the implementation happened to speak SMTP. A genuine cancellation is not
+            // reported as this, so it still propagates.
         }
     }
-
-    private static bool IsTransientEmailFailure(Exception ex) =>
-        ex is SmtpException or SocketException; // SmtpFailedRecipientException derives from SmtpException
 
     public async Task<AuthResponse> LoginAsync(LoginRequest request, CancellationToken cancellationToken = default)
     {

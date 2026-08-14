@@ -1,4 +1,3 @@
-using System.Text.Json;
 using TripPlanner.Application.Common.Exceptions;
 using TripPlanner.Application.Common.Interfaces;
 using TripPlanner.Application.Common.Validation;
@@ -173,6 +172,12 @@ public class TripService : ITripService
 
         await EnsureDayBelongsToTripAsync(request.ItineraryDayId, trip.Id, cancellationToken);
 
+        // ORDER MATTERS: this must stay ABOVE the trip.Items.Add below. Every
+        // repository shares one scoped DbContext and each write method calls
+        // SaveChanges on all of it, so once the trip graph is mutated in memory,
+        // the destination insert inside here would flush that half-finished change
+        // with it. Adding the destination while the trip is still untouched keeps
+        // the two saves independent.
         var destination = await GetOrCreateDestinationAsync(request.ProviderId, cancellationToken);
 
         EnsureNotDuplicate(trip, destination.Id, request.ItineraryDayId);
@@ -369,20 +374,11 @@ public class TripService : ITripService
         {
             destination.ImageUrl = await _imageSearch.SearchImageAsync(destination.Name, cancellationToken);
         }
-        catch (Exception ex) when (IsTransientExternalFailure(ex) && !cancellationToken.IsCancellationRequested)
+        catch (ExternalServiceUnavailableException)
         {
             // Already logged by SerperImageClient; the destination is still saved.
         }
     }
-
-    /// <summary>
-    /// True for the external-call failure modes treated as "no image found"
-    /// rather than "the whole request must fail": connection failures,
-    /// HttpClient timeouts (surfaced as TaskCanceledException, not
-    /// HttpRequestException), and an unparseable response body.
-    /// </summary>
-    private static bool IsTransientExternalFailure(Exception ex) =>
-        ex is HttpRequestException or TaskCanceledException or JsonException;
 
     public async Task RemoveDestinationAsync(Guid tripId, Guid itemId, CancellationToken cancellationToken = default)
     {

@@ -3,6 +3,7 @@ using System.Net.Mail;
 using System.Net.Sockets;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using TripPlanner.Application.Common.Exceptions;
 using TripPlanner.Application.Common.Interfaces;
 
 namespace TripPlanner.Infrastructure.Email;
@@ -11,9 +12,13 @@ namespace TripPlanner.Infrastructure.Email;
 /// <see cref="IEmailSender"/> over Gmail's SMTP relay (smtp.gmail.com:587,
 /// STARTTLS). See <see cref="SmtpSettings"/> for the App Password requirement.
 ///
-/// A transient failure is logged here and then RETHROWN. Swallowing it would move
-/// the "registration succeeds even when mail is down" guarantee (F4/US1) out of
+/// A transient failure is logged here and then rethrown as
+/// <see cref="ExternalServiceUnavailableException"/>. Swallowing it would move the
+/// "registration succeeds even when mail is down" guarantee (F4/US1) out of
 /// AuthService, where a test asserts it, and into this class, where nothing does.
+/// Translating it is what keeps that guarantee independent of SMTP: AuthService
+/// catches the Application-layer type, so replacing this class with an HTTP mail
+/// API cannot quietly turn a mail outage back into a failed registration.
 /// </summary>
 public class SmtpEmailSender : IEmailSender
 {
@@ -57,7 +62,7 @@ public class SmtpEmailSender : IEmailSender
             // The recipient address is deliberately NOT logged — it is personal
             // data, and the exception alone is enough to diagnose an outage.
             _logger.LogWarning(ex, "Failed to send email {Subject} over SMTP.", subject);
-            throw;
+            throw new ExternalServiceUnavailableException("Sending email over SMTP failed.", ex);
         }
     }
 
