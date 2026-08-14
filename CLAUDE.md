@@ -50,7 +50,7 @@ npm run lint       # tsc --noEmit + ESLint (flat config in eslint.config.js)
 npm test           # Vitest (single run); npm run test:watch for watch mode
 
 # Run a single test file
-npx vitest run src/auth/AuthContext.test.tsx
+npx vitest run tests/auth/AuthContext.test.tsx
 ```
 
 ### Quick start (both servers, from repo root)
@@ -152,10 +152,19 @@ Each feature folder holds: the service implementation, an interface, and a `Dtos
 src/
   api/         ← axios wrappers: client.ts (base instance), auth.ts, destinations.ts, trips.ts
   auth/        ← AuthContext (JWT storage, reactive logout on 401), ProtectedRoute
+  components/  ← shared UI shell: Avatar, Button, Card, EmptyState, Field, Modal
   features/    ← page components grouped by feature (auth, destinations, trips — all implemented)
+  hooks/       ← useDebounce
   types.ts     ← shared TypeScript types for every DTO (auth, destination, trip)
   App.tsx      ← React Router route definitions
+tests/         ← mirrors src/ one-for-one, plus setup.ts and http.ts
 ```
+
+Tests live in `tests/`, **not** beside the code — the same split the backend uses
+(`backend/tests` mirrors `backend/src`), so `src/` holds only shipped code. A test for
+`src/features/trips/TripsPage.tsx` belongs at `tests/features/trips/TripsPage.test.tsx`;
+keep the mirror exact, because `vite.config.ts` pins `include: ['tests/**/*.test.{ts,tsx}']`
+and a test left under `src/` will simply never run.
 
 HTTP client (`src/api/client.ts`) is a configured Axios instance whose JWT interceptor
 attaches `Authorization: Bearer <token>` when present, and exposes two shared error helpers:
@@ -169,33 +178,40 @@ follow `auth.ts`'s pattern: thin typed wrappers over `apiClient`, no raw `fetch`
 calls in components.
 
 **Frontend tests** run on Vitest + React Testing Library in a `jsdom` environment,
-configured in the `test` block of `vite.config.ts` with `src/test/setup.ts` as the setup
+configured in the `test` block of `vite.config.ts` with `tests/setup.ts` as the setup
 file. `globals` is deliberately **false**: test files import `describe`/`it`/`expect` from
-`vitest` explicitly, which means the existing `tsconfig.json` (whose `include` already
-covers `src`) type-checks them with no `types` entry — so `npm run lint` checks the tests
-too, and a wrong mock signature fails the build rather than passing silently. Because
+`vitest` explicitly, which means `tsconfig.json` (whose `include` covers `src` **and**
+`tests`) type-checks them with no `types` entry — so `npm run lint` checks the tests
+too, and a wrong mock signature fails the build rather than passing silently. Keep `tests`
+in that `include` list: drop it and the suite still runs, but it stops being type-checked
+and every mock signature silently rots. Because
 globals are off, RTL cannot register its own `afterEach`, so setup.ts calls `cleanup()`
 **and** `localStorage.clear()` by hand — `AuthProvider` reads localStorage during its
 initial render, so a leftover session would leak into the next test.
 
-Covered so far: the `client.ts` error helpers, `AuthProvider` (login/logout persistence,
-refresh restore, the reactive-logout listener, and that register does *not* start a
-session), `ProtectedRoute`'s redirect, and three feature pages — `LoginPage` (the 403 →
-resend-verification branch, and returning to the page that sent the user there),
-`TripsPage` (list/empty/load-error, the create-trip modal, and the F3/US10 status pill),
-`DestinationDetailsPage` (404 → "not found" versus a retryable failure), and
-`TripDetailPage` (load states, the edit modal, remove-with-confirm, optimistic
-drag-and-drop with rollback, and the Saved Places filter).
+Coverage is now whole-tree — every module under `src/` has a matching file under `tests/`.
+Worth knowing where the non-obvious value sits: `client.ts`'s error helpers **and** its two
+interceptors (including the `&& getToken()` guard that stops a mistyped password triggering
+the logout flow); the three `src/api/` wrappers, which matter because every page test mocks
+those modules wholesale — without wrapper tests a wrong URL or renamed body field would be
+invisible to the entire suite; `AuthProvider` (login/logout persistence, refresh restore,
+the reactive-logout listener, and that register does *not* start a session);
+`ProtectedRoute`'s redirect; `App.tsx`'s route table and auth guard; every feature page; and
+the shared `components/` shell.
 
 Conventions these follow:
 
-- API modules are mocked wholesale with `vi.mock('../../api/<module>', ...)` — list every
-  export, since a partial factory makes the missing ones `undefined` at call time.
+- API modules are mocked wholesale with `vi.mock('<…>/src/api/<module>', ...)` — the path is
+  relative to the *test* file, so it climbs out of `tests/` and back into `src/`
+  (`'../../../src/api/trips'` from `tests/features/trips/`). List every export, since a
+  partial factory makes the missing ones `undefined` at call time.
 - "Already signed in" is expressed by seeding `localStorage['tripplanner.user']` **before**
   render, because that is what `AuthProvider` reads during its initial render.
 - Build axios rejections with `httpError(status, body)` / `networkError()` from
-  `src/test/http.ts` rather than hand-rolled objects, so `getErrorMessage`/`getErrorStatus`
-  take their real branches.
+  `tests/http.ts` rather than hand-rolled objects, so `getErrorMessage`/`getErrorStatus`
+  take their real branches. The same file's `recordRequests(instance)` swaps in a recording
+  adapter — the seam *below* the interceptors — so the `src/api/` wrapper tests assert on
+  the URL, params and headers that would really go on the wire.
 - Date-dependent assertions (the status pill) are written **relative to today** via an
   offset helper, so they cannot rot into failures on a future date.
 - `DestinationDetailsPage` needs an `AuthProvider` wrapper for its success path only —
@@ -217,7 +233,7 @@ a silent no-op — the listener-cleanup test now asserts against the `addEventLi
 `removeEventListener` pair instead. And a test asserting only that things are *absent*
 passes just as happily when the page crashes; pair every absence check with a positive one.
 
-Every feature page and component now has a test file.
+Every module under `src/` has a test file; when you add one, add its mirror under `tests/`.
 
 `CitySearchInput.test.tsx` uses **real timers**: the 300 ms debounce fits inside
 `findBy*`'s 1 s default, which is simpler and less brittle than driving fake timers
