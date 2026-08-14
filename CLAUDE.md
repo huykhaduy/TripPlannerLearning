@@ -345,3 +345,5 @@ flow is driven by minting a token directly via `IJwtTokenGenerator` (resolved fr
   `?? "localhost default"` (or class-level default) in code, so the app still runs with an empty
   `.env` for those — see `AppUrlProvider.cs`, `DependencyInjection.cs` (Geoapify/Serper `HttpClient`
   setup), `SmtpSettings.cs`, and `Program.cs`'s CORS policy.
+- `docker-compose.yml` (repo root) is local dev only; `docker-compose.deploy.yml` is the
+  separate Coolify deployment topology — see `docs/deployment-coolify.md`.
