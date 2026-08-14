@@ -20,7 +20,7 @@ you are deploying (Coolify redeploys on push to it).
 | Setting | Value |
 |---|---|
 | Base Directory | `/` |
-| Docker Compose Location | `docker-compose.deploy.yml` |
+| Docker Compose Location | `/docker-compose.deploy.yml` |
 
 Base Directory is `/`, **not** `backend`, because the compose file lives at the repo root
 and sets `context: ./backend` itself.
@@ -107,8 +107,13 @@ curl -f https://<domain>/health
 curl "https://<domain>/api/destinations/locations?query=paris"
 ```
 
-→ a JSON array, proving the Geoapify key works. Run it twice; the second call should be
-faster, proving the Redis cache path.
+→ a JSON array, proving the Geoapify key works. Then confirm the Redis cache path
+deterministically: open Coolify's terminal for the `redis` service and run
+`redis-cli KEYS 'TripPlanner:*'` (that prefix is `AddCaching`'s `InstanceName` in
+`backend/src/TripPlanner.Infrastructure/DependencyInjection.cs`) — a non-empty result
+means the search above was cached. Running the search twice and comparing latency is at
+best a soft signal, not proof: a sub-100ms difference over the public internet doesn't
+prove anything on its own.
 
 ```bash
 curl -X POST https://<domain>/api/auth/register \
@@ -117,7 +122,11 @@ curl -X POST https://<domain>/api/auth/register \
 ```
 
 → success, proving Postgres is writable and migrations ran. The verification email
-arriving proves the SMTP credentials.
+arriving proves the SMTP credentials — but if `FRONTEND_URL` is still set to the §3
+placeholder (the API's own domain), only the email's *arrival* is being tested: the link
+inside it points at a frontend route (`{FrontendBaseUrl}/verify-email?token=…`, see
+`AuthService.cs`) that the API doesn't serve, so clicking it 404s until `FRONTEND_URL` is
+updated to the real frontend.
 
 Finally, in Coolify's UI, confirm `postgres` and `redis` have **no** public URL.
 
@@ -141,3 +150,10 @@ rollback across a schema change needs a migration written for it.
   exception pages on a public host — use `curl` instead.
 - **Single instance.** Migrations-on-startup assumes one `api` container; two replicas
   booting together would race `MigrateAsync`.
+- **`Location` header reads `http://` behind Coolify's proxy.** `Program.cs` never calls
+  `UseForwardedHeaders`, so `Request.Scheme` is `http` even though Coolify terminates TLS
+  in front of it. The one place this surfaces is `TripsController`'s `CreatedAtAction`,
+  whose `Location` response header reads `http://<domain>/api/trips/<id>` instead of
+  `https://`. Nothing breaks today — the React client reads the response body, not that
+  header — but a client that followed it from an HTTPS page would hit mixed-content
+  blocking.

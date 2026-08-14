@@ -21,7 +21,7 @@ FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
 WORKDIR /app
 
 # Solely so docker-compose.deploy.yml's healthcheck has something to run: the aspnet
-# runtime image ships neither curl nor wget. ~5MB; the list cleanup keeps it there.
+# runtime image ships neither curl nor wget. ~10MB; the list cleanup keeps it there.
 # If the /health healthcheck is ever dropped, drop this too.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl \
