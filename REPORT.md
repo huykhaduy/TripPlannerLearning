@@ -31,7 +31,7 @@ Tài liệu này tập trung vào **cách làm và lý do quyết định**, kh�
 | ORM / DB | EF Core + PostgreSQL (Npgsql) |
 | Auth | JWT Bearer, BCrypt hash mật khẩu |
 | Validation | FluentValidation |
-| Cache | `IDistributedCache` — in-process (mặc định) hoặc Redis |
+| Cache | `IStaleTolerantCache` (port) trên `IDistributedCache` — in-process (mặc định) hoặc Redis |
 | API ngoài | Geoapify (địa điểm/POI), Serper (tìm ảnh), SMTP (email xác thực) |
 | Frontend | React + TypeScript + Vite + React Router + Axios |
 | Test | xUnit + Moq + EF InMemory + `WebApplicationFactory`; Vitest + React Testing Library |
@@ -93,13 +93,33 @@ không có test nào khác trong suite phát hiện được.
 | Project | ProjectReference | Package chính |
 |---|---|---|
 | `TripPlanner.Domain` | *(không có)* | *(không có)* |
-| `TripPlanner.Application` | Domain | FluentValidation, các gói `*.Abstractions` |
+| `TripPlanner.Application` | Domain | FluentValidation, `DependencyInjection.Abstractions` |
 | `TripPlanner.Infrastructure` | Application | EF Core, Npgsql, BCrypt, StackExchange.Redis, JWT |
 | `TripPlanner.WebApi` | Application + Infrastructure | ASP.NET Core, Swagger, DotNetEnv |
 
 Điểm mạnh nhất: **Domain không có một `PackageReference` nào**. Nếu vô tình viết
 `using Microsoft.EntityFrameworkCore;` trong `AuthService.cs`, project **không build được** —
 kiến trúc được compiler ép buộc chứ không phụ thuộc kỷ luật lập trình viên.
+
+Application chỉ còn **hai** package. `Caching.Abstractions` và `Logging.Abstractions` từng có mặt,
+và cả hai biến mất khi cơ chế cache được đẩy xuống Infrastructure (mục 7) — một cách kiểm tra
+"tầng này có bị rò công nghệ không" mà không cần đọc code: cứ nhìn file `.csproj`.
+
+### Domain không chỉ chứa dữ liệu — nó giữ quy tắc của chính nó
+
+`Trip` là aggregate root của cả ba entity `Trip` / `ItineraryDay` / `ItineraryItem`. Mọi quy tắc về
+*ngày nào tồn tại*, *item nằm bucket nào*, *thứ tự ra sao* đều nằm trên `Trip`:
+
+| Method | Giữ bất biến gì |
+|---|---|
+| `SetDates` | start ≤ end, **và** Days luôn khớp khoảng ngày |
+| `MoveItem` | SortOrder liền mạch 0..n ở cả hai bucket bị ảnh hưởng |
+| `NextSortOrderIn` | item mới luôn rơi xuống cuối bucket |
+| `HasDestinationIn` | một địa điểm xuất hiện tối đa một lần mỗi bucket |
+
+`StartDate`/`EndDate` để `private set`, nên **không có đường nào** đổi ngày mà lách được
+validation. Toàn bộ các method này thuần tuý (không I/O), nên `TripTests` kiểm chúng không cần
+mock lẫn DbContext.
 
 ### Dependency Inversion — Application định nghĩa, Infrastructure thực thi
 
@@ -112,6 +132,7 @@ bên gọi database. Được như vậy vì Application chỉ khai báo **cái 
 | `IPasswordHasher` | `BCryptPasswordHasher` |
 | `IJwtTokenGenerator` | `JwtTokenGenerator` |
 | `IDestinationProvider` | `GeoapifyClient` |
+| `IStaleTolerantCache` | `DistributedStaleTolerantCache` |
 | `IImageSearchProvider` | `SerperImageClient` |
 | `IEmailSender` | `SmtpEmailSender` |
 | `IAppUrlProvider` | `AppUrlProvider` |
@@ -261,35 +282,43 @@ Duyệt/tìm kiếm không làm phình DB.
 
 ### 3.3. Đổi ngày trip → sinh lại itinerary days
 
-Đây là thuật toán khó nhất trong project (`TripService.RegenerateDays`):
+Đây là thuật toán khó nhất trong project, và nó nằm **trong Domain** (`Trip.SetDates` →
+`Trip.RegenerateDays`), không phải trong service:
 
 ```
 PUT /api/trips/{tripId}  { name, startDate, endDate }
    ▼
 1. validator (tên bắt buộc)
-2. Trip.SetDates(start, end)  ← quy tắc DOMAIN: start ≤ end, sai thì DomainException → 400
-3. RegenerateDays(trip):
-     • ngày CÒN nằm trong range   → GIỮ NGUYÊN, giữ luôn các item đã xếp
-     • ngày RƠI RA ngoài range    → xoá; item của nó QUAY VỀ Saved Places (không mất)
-     • ngày MỚI trong range       → tạo mới
-     • cuối cùng: đánh số lại theo thứ tự thời gian
-4. UpdateAsync (lưu 1 lần)
+2. Trip.SetDates(start, end)  ← MỘT lời gọi, làm hai việc không tách rời:
+     a. quy tắc DOMAIN: start ≤ end, sai thì DomainException → 400 (ném TRƯỚC khi sửa gì)
+     b. sinh lại days cho range mới:
+        • ngày CÒN nằm trong range   → GIỮ NGUYÊN, giữ luôn các item đã xếp
+        • ngày RƠI RA ngoài range    → xoá; item của nó QUAY VỀ Saved Places (không mất)
+        • ngày MỚI trong range       → tạo mới
+        • cuối cùng: đánh số lại theo thứ tự thời gian
+3. UpdateAsync (lưu 1 lần)
 ```
 
 Không xoá sạch rồi tạo lại — làm vậy sẽ mất hết lịch trình user đã xếp chỉ vì lùi ngày về 1 hôm.
 Code còn **mirror cascade `SetNull` của DB vào in-memory**, để DTO trả về đã hiển thị đúng
 "item quay lại Saved Places" ngay, không cần load lại.
 
+**Vì sao gộp vào `SetDates` chứ không để service gọi hai bước:** nếu tách, mọi caller đều phải nhớ
+gọi bước 2 — quên một lần là trip có ngày không khớp với khoảng ngày của nó. Gộp lại thì bất biến
+"Days luôn khớp date range" trở thành **không thể phá vỡ từ bên ngoài**. `StartDate`/`EndDate` cũng
+để `private set` vì lý do đó: không có đường nào đổi ngày mà lách được validation.
+
 ### 3.4. Kéo thả sắp xếp lịch trình
 
 ```
 PUT /api/trips/{tripId}/destinations/{itemId}  { itineraryDayId, sortOrder }
-   ▼ TripService.UpdateItineraryItemAsync
+   ▼ TripService.UpdateItineraryItemAsync   ← điều phối
        - itineraryDayId = null nghĩa là "Saved Places"
-       - EnsureNotDuplicate(..., excludeItemId: itemId)
+       - Trip.HasDestinationIn(..., excludeItemId: itemId)   ← DOMAIN trả lời "có trùng không"
          ← item được miễn tự-đối-chiếu, nên kéo thả trong cùng 1 ngày vẫn hợp lệ
-       - MoveItem: chèn vào vị trí, sortOrder được CLAMP → gửi 99 nghĩa là "cuối cùng"
-       - Resequence CẢ HAI bucket về 0..n → giá trị luôn liền mạch, không có khoảng trống
+         ← service mới là chỗ ném ConflictException → 409 (409 là từ vựng của tầng HTTP)
+       - Trip.MoveItem: chèn vào vị trí, sortOrder được CLAMP → gửi 99 nghĩa là "cuối cùng"
+         ← Resequence CẢ HAI bucket về 0..n → giá trị luôn liền mạch, không có khoảng trống
        - MỘT lần save → hai bucket đổi nguyên tử
 ```
 
@@ -456,18 +485,41 @@ không cache (dữ liệu riêng tư, thay đổi liên tục).
 
 **Thời gian lưu giữ (retention): 7 ngày** — dài hơn TTL rất nhiều. Đây là mấu chốt của thiết kế.
 
-### Thiết kế cốt lõi: "stale-better-than-down"
+### Tách CHÍNH SÁCH khỏi CƠ CHẾ
 
-Không dùng TTL của cache để evict. Thay vào đó bọc giá trị trong một envelope tự quản lý:
+Đây là điểm đáng nói nhất khi thuyết trình. Hai thứ trước đây nằm chung trong
+`DestinationService` giờ ở hai tầng khác nhau, vì chúng thay đổi vì những lý do khác nhau:
+
+| | Là gì | Ở đâu |
+|---|---|---|
+| **Chính sách** | TTL bao lâu, khi nào chấp nhận dữ liệu cũ | Application — `DestinationService` |
+| **Cơ chế** | JSON, `byte[]`, expiry options, retention 7 ngày | Infrastructure — `DistributedStaleTolerantCache` |
+
+Ranh giới là port `IStaleTolerantCache`: *"cất giá trị kèm thời điểm lấy, và trả lại bất kể nó cũ
+đến đâu — cũ bao nhiêu là chấp nhận được thì người gọi tự quyết"*.
 
 ```csharp
-private sealed record CacheEnvelope<T>(T Value, DateTimeOffset FetchedAt);
+public interface IStaleTolerantCache
+{
+    Task<CacheEnvelope<T>?> TryGetAsync<T>(string key, CancellationToken ct = default);
+    Task SetAsync<T>(string key, CacheEnvelope<T> envelope, CancellationToken ct = default);
+}
+
+public sealed record CacheEnvelope<T>(T Value, DateTimeOffset FetchedAt);
 ```
+
+Kết quả cụ thể, kiểm chứng được: **Application không còn tham chiếu `System.Text.Json` lẫn
+`Microsoft.Extensions.Caching.Abstractions`** — cả hai package đã bị gỡ khỏi
+`TripPlanner.Application.csproj`.
+
+### Thiết kế cốt lõi: "stale-better-than-down"
+
+Không dùng TTL của cache backend để evict. Toàn bộ chính sách nằm gọn trong một hàm ở Application:
 
 ```csharp
 private async Task<T> GetCachedAsync<T>(string key, TimeSpan ttl, Func<Task<T>> fetchAsync, CancellationToken ct)
 {
-    var stale = await TryGetCachedEnvelopeAsync<T>(key, ct);
+    var stale = await _cache.TryGetAsync<T>(key, ct);
 
     // 1. HIT còn tươi → trả luôn, không gọi provider
     if (stale is not null && _clock.GetUtcNow() - stale.FetchedAt < ttl)
@@ -477,16 +529,21 @@ private async Task<T> GetCachedAsync<T>(string key, TimeSpan ttl, Func<Task<T>> 
     {
         // 2. MISS hoặc hết hạn → gọi provider, cache lại
         var value = await fetchAsync();
-        await SetCachedEnvelopeAsync(key, new CacheEnvelope<T>(value, _clock.GetUtcNow()), ct);
+        await _cache.SetAsync(key, new CacheEnvelope<T>(value, _clock.GetUtcNow()), ct);
         return value;
     }
-    catch (Exception ex) when (IsTransientExternalFailure(ex) && !ct.IsCancellationRequested && stale is not null)
+    catch (ExternalServiceUnavailableException) when (stale is not null)
     {
         // 3. Provider CHẾT nhưng còn entry cũ → trả dữ liệu cũ còn hơn trả lỗi
         return stale.Value;
     }
 }
 ```
+
+Chú ý mệnh đề `catch`: chỉ bắt **đúng một** type do adapter dịch ra. Trước đây chỗ này bắt theo
+một predicate ba-loại-exception (`HttpRequestException`/`TaskCanceledException`/`JsonException`)
+bị copy sang cả `AuthService` và `TripService` — nghĩa là Application phải biết provider nói
+giao thức gì.
 
 **Vì sao tự kiểm tra freshness thay vì để cache tự evict:** nếu để cache evict theo TTL, entry
 hết hạn sẽ **biến mất** — lúc Geoapify sập thì không còn gì để fallback. Giữ entry 7 ngày và tự
@@ -496,10 +553,13 @@ so `FetchedAt` với TTL cho phép phân biệt ba trạng thái: *tươi*, *cũ
 `_clock` là `TimeProvider` được inject (đăng ký `TimeProvider.System` trong `AddApplication()`),
 nên test có thể tua thời gian để kiểm tra logic hết hạn mà không cần `Thread.Sleep`.
 
-### Ba tầng chống lỗi
+### Bốn tầng chống lỗi
 
 ```
-DestinationService                  ← tầng 3: provider chết → trả stale
+DestinationService                  ← tầng 4: provider chết → trả stale
+   │ IStaleTolerantCache (port của Application)
+   ▼
+DistributedStaleTolerantCache       ← tầng 3: entry lệch shape → coi như miss
    │ IDistributedCache (abstraction)
    ▼
 ResilientDistributedCache           ← tầng 2: Redis chết → coi như cache miss
@@ -507,6 +567,10 @@ ResilientDistributedCache           ← tầng 2: Redis chết → coi như cach
    ▼
 MemoryDistributedCache / RedisCache ← tầng 1: backend chọn qua config
 ```
+
+Thứ tự này có chủ đích: tầng 3 nằm **trên** tầng 2, nên khi request tới được chỗ deserialize thì
+lỗi kết nối backend đã bị biến thành "miss" rồi. Nhờ vậy `DistributedStaleTolerantCache` chỉ phải
+lo đúng một loại lỗi: payload đọc không ra.
 
 **`ResilientDistributedCache`** là decorator, bọc bất kỳ backend nào được cấu hình:
 
@@ -543,7 +607,7 @@ Vì entry sống 7 ngày, việc đổi shape của một DTO sẽ khiến mọi
 ```csharp
 catch (JsonException ex)
 {
-    _logger.LogWarning(ex, "Discarding a cache entry for {Key} that no longer matches {Type}.", key, typeof(T).Name);
+    logger.LogWarning(ex, "Discarding a cache entry that no longer matches {Type}.", typeof(T).Name);
     return null;   // coi như miss
 }
 ```
@@ -551,6 +615,16 @@ catch (JsonException ex)
 Coi như miss (để request không bị 500), nhưng **có log** — nếu không thì hiện tượng này trông
 hệt như "cache tự dưng ngừng hoạt động". Lưu ý: **không** áp dụng cách xử lý này lúc *ghi* —
 serialize lỗi khi ghi là bug thật, phải để nó nổi lên.
+
+Message log **không kèm cache key**, đúng với chính sách ở mục 8: key nhúng từ khoá người dùng
+nhập. Trước khi tách adapter, chỗ này log cả key — mâu thuẫn với chính `ResilientDistributedCache`
+ngay bên cạnh, vốn ghi rõ là không log key.
+
+Nhánh này trước đây **không có test nào**: `DestinationService` chỉ từng được truyền
+`NullLogger`, nên cái Warning — vốn là toàn bộ hành vi nhìn thấy được của nó — chưa bao giờ được
+assert. Sau khi chuyển sang Infrastructure, `DistributedStaleTolerantCacheTests` phủ 8 case, gồm
+cả retention 7 ngày (thứ khiến stale-better-than-down khả thi) và việc lỗi serialize khi ghi
+**không** bị nuốt.
 
 ### Vài chi tiết nhỏ đáng nói
 
@@ -597,11 +671,15 @@ Vì caller cần **phân biệt** các trường hợp mà adapter không có đ
 `ResilientDistributedCache` là **ngoại lệ duy nhất được phép nuốt**, vì degrade thành cache miss
 chính là *hợp đồng* của nó.
 
-### Chỉ một `ILogger` trong tầng Application
+### Không còn `ILogger` nào trong tầng Application
 
-`DestinationService` là class duy nhất ở Application có logger, cho đúng **một** loại lỗi phát
-sinh *tại tầng này* thay vì từ adapter: entry cache không còn khớp shape DTO — đó là lỗi với hợp
-đồng JSON của chính dự án, không có adapter nào để đẩy vào.
+Trước đây `DestinationService` là class duy nhất ở Application có logger, cho đúng một loại lỗi
+phát sinh *tại tầng này*: entry cache không còn khớp shape DTO. Sau khi tách cơ chế cache, lỗi đó
+phát sinh trong adapter (`DistributedStaleTolerantCache`) và logger đi theo nó.
+
+Kết quả: **Application không còn logger nào cả**, và `Microsoft.Extensions.Logging.Abstractions`
+đã bị gỡ khỏi `TripPlanner.Application.csproj`. Đây là một quy tắc dễ kiểm: nếu bạn thấy cần
+`ILogger` trong Application, gần như chắc chắn lỗi đó thuộc về một adapter.
 
 ### Structured logging
 
@@ -797,7 +875,8 @@ mảng chưa lọc.
 
 | Tầng | Kiểm gì | Công cụ |
 |---|---|---|
-| `*ServiceTests` | Business logic | EF InMemory (DB mới mỗi test) + Moq |
+| `TripTests` (Domain) | Quy tắc của aggregate: sinh lại days, move/resequence, chống trùng | Không mock, không DbContext |
+| `*ServiceTests` | Điều phối use-case | EF InMemory (DB mới mỗi test) + Moq |
 | `*ValidatorTests` | Lỗi rơi vào **property** nào, **message** chính xác, **biên** hai phía | `TestValidate` |
 | `TripPlanner.WebApi.Tests` | Routing thật, `[Authorize]` thật, middleware map status, binding query string | `WebApplicationFactory<Program>` |
 | Frontend | Hành vi người dùng | Vitest + React Testing Library (jsdom) |
@@ -818,7 +897,9 @@ không bị vô tình phá:
 |---|---|
 | `Login_WithAPasswordShorterThanRegisterAllows_IsStillValid` | Thêm rule độ dài vào login sẽ khoá tài khoản cũ |
 | `UpdateTrip_WithEndBeforeStart_IsNotTheValidatorsJob` | Đó là quy tắc domain (`Trip.SetDates`), không phải việc của validator |
-| `UpdateItem_WithAPositionPastTheEndOfTheBucket_IsValid` | `TripService` clamp — "99" nghĩa là "cuối cùng" |
+| `UpdateItem_WithAPositionPastTheEndOfTheBucket_IsValid` | `Trip.MoveItem` clamp — "99" nghĩa là "cuối cùng" |
+| `SetDates_WhenItRejects_LeavesTheDaysUntouched` | Ngày sai không được để itinerary bị xây dở |
+| `SetAsync_RetainsEntriesWellPastAnyTtl` | Bỏ retention là giết luôn stale-better-than-down |
 | `DestinationConfigurationTests` | Không ai được thêm lại `HasMaxLength` cho `ProviderId` |
 | `DestinationsEndpointsTests` | Endpoint destinations phải giữ **công khai** |
 | `TestHostConfigurationTests` | Test host không bao giờ ký token bằng key thật của dev |
@@ -887,6 +968,25 @@ một dòng nhất quán ở đầu mỗi method. Thêm MediatR nghĩa là mỗi
 nhận lại gì. **Điều gì sẽ đảo ngược:** khi cần cross-cutting behavior thứ ba trở lên áp cho mọi
 handler, hoặc khi tách đường đọc sang read model riêng.
 
+### "Sao logic lịch trình nằm trong entity `Trip` mà không phải trong service?"
+
+Vì đó là quy tắc về **tính nhất quán nội tại** của chính `Trip`, không phải quy tắc use-case.
+`RegenerateDays`, `MoveItem`, `Resequence`, `HasDestinationIn` đều thuần tuý: không chạm
+repository, không chạm clock, không chạm provider — chúng chỉ đọc và sửa `trip.Days` / `trip.Items`.
+Đó đúng là định nghĩa của hành vi aggregate.
+
+Trước đây chúng nằm trong `TripService` dưới dạng `private static`, và hệ quả rất cụ thể:
+
+- `Trip.cs` chỉ có 39 dòng với đúng một method — Domain là nơi chứa dữ liệu, không phải nơi chứa
+  quy tắc. Đó là cách một dự án "Clean Architecture" âm thầm thoái hoá thành CRUD phân tầng.
+- Muốn test thuật toán sinh lại ngày phải đi qua `TripServiceTests` với **5 interface được mock**.
+  Giờ `TripTests` test thẳng, không mock, chạy trong ~55 ms.
+
+Ranh giới được giữ có chủ đích: `Trip.HasDestinationIn` chỉ **trả lời** "có trùng không";
+`TripService` mới là chỗ ném `ConflictException` → 409. Nếu đẩy cả việc ném xuống Domain thì nó
+thành `DomainException` → 400, sai ngữ nghĩa. Domain nói *sự thật*, Application quyết định *hậu quả
+HTTP*.
+
 ### "Sao repository không có Unit of Work? Sao mỗi method tự SaveChanges?"
 
 Vì mỗi request trong hệ này thao tác đúng một aggregate. Không có kịch bản nào cần gom nhiều
@@ -929,6 +1029,21 @@ App vẫn chạy. `ResilientDistributedCache` bắt `RedisConnectionException` /
 Geoapify — chậm hơn, nhưng không lỗi. Đây cũng là nơi **duy nhất** trong solution biết tới
 exception type của Redis.
 
+### "Sao phải thêm `IStaleTolerantCache`? `IDistributedCache` đã là abstraction rồi mà?"
+
+Đúng là abstraction, nhưng là abstraction **về công nghệ**, không phải về nghiệp vụ: nó nói bằng
+`byte[]`, chuỗi key và `DistributedCacheEntryOptions`. Tầng Application không cần biết gì trong
+số đó.
+
+Cái Application thực sự cần diễn đạt chỉ là: *"cất giá trị kèm thời điểm lấy, trả lại bất kể cũ
+đến đâu"*. Phần còn lại — serialize JSON, cửa sổ retention 7 ngày, xử lý entry đọc không ra — là
+chi tiết cài đặt.
+
+Bằng chứng đây không phải thay đổi hình thức: sau khi tách, **hai package reference biến mất khỏi
+`TripPlanner.Application.csproj`** (`System.Text.Json` qua `Caching.Abstractions`, và
+`Logging.Abstractions`). Trước đó `DestinationService` dài 410 dòng mà khoảng 40% là cơ chế cache;
+giờ còn 328 dòng và đọc ra đúng ba use-case.
+
 ### "Nếu Geoapify chết thì sao?"
 
 Ba tình huống: (1) còn entry trong retention 7 ngày → trả dữ liệu cũ; (2) không còn entry → lỗi
@@ -941,10 +1056,12 @@ của mình, vì địa điểm đã lưu trong trip phải xem được kể c�
 Vì cần phân biệt ba trạng thái chứ không phải hai: *tươi*, *cũ nhưng dùng được*, *không có*.
 Để cache evict theo TTL thì entry hết hạn biến mất, và đúng lúc provider sập lại không còn gì để
 fallback. Bọc trong `CacheEnvelope(Value, FetchedAt)` với retention 7 ngày giải quyết chuyện đó.
+Việc *so sánh* TTL là chính sách nên nằm ở Application; việc *lưu* kèm timestamp là cơ chế nên
+nằm sau `IStaleTolerantCache`.
 
 ### "Đổi ngày trip thì lịch trình đã xếp có mất không?"
 
-Không. `RegenerateDays` giữ nguyên ngày còn nằm trong range cùng toàn bộ item của nó. Ngày rơi ra
+Không. `Trip.SetDates` giữ nguyên ngày còn nằm trong range cùng toàn bộ item của nó. Ngày rơi ra
 ngoài mới bị xoá, và item của nó **quay về Saved Places** chứ không bị xoá theo (DB cấu hình
 `SetNull`, và code mirror hành vi đó vào in-memory để DTO trả về đã đúng ngay).
 
@@ -987,7 +1104,8 @@ này cũng không phải sửa `client.ts`.
 ### "Nếu phải scale nhiều instance thì sao?"
 
 JWT là stateless nên auth scale sẵn. Cache đổi sang Redis chỉ bằng một biến `.env` — đó là lý do
-`DestinationService` phụ thuộc `IDistributedCache` chứ không phải `IMemoryCache`. Điểm cần chú ý
+`DestinationService` phụ thuộc `IStaleTolerantCache` (implement bằng `IDistributedCache`) chứ
+không phải `IMemoryCache`. Điểm cần chú ý
 khi scale: `SortOrder` không có unique index (xem phần Hạn chế).
 
 ---
