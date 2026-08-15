@@ -108,58 +108,13 @@ public class TripService : ITripService
             ?? throw new NotFoundException(nameof(Trip), tripId);
 
         trip.Name = request.Name.Trim();
-        // Domain rule: start ≤ end (throws DomainException -> 400).
+        // Domain rules: start ≤ end (throws DomainException -> 400), and the
+        // itinerary days are regenerated for the new range (F3/US2, spec §11.1).
         trip.SetDates(request.StartDate, request.EndDate);
-
-        RegenerateDays(trip);
 
         await _trips.UpdateAsync(trip, cancellationToken);
 
         return trip.ToDetailDto();
-    }
-
-    /// <summary>
-    /// F3/US2 day regeneration (spec §11.1): keep days still inside the date
-    /// range (preserving their scheduled items), delete days that fell out of
-    /// it (their items return to Saved Places), create days for new dates,
-    /// then renumber chronologically.
-    /// </summary>
-    private void RegenerateDays(Trip trip)
-    {
-        var targetDates = new HashSet<DateOnly>();
-        if (trip.StartDate is { } start && trip.EndDate is { } end)
-        {
-            for (var date = start; date <= end; date = date.AddDays(1))
-            {
-                targetDates.Add(date);
-            }
-        }
-
-        foreach (var day in trip.Days.Where(d => !targetDates.Contains(d.Date)).ToList())
-        {
-            // Mirror the DB's SetNull cascade in memory so the DTO we return
-            // already shows these items back in Saved Places.
-            foreach (var item in day.Items)
-            {
-                item.ItineraryDayId = null;
-            }
-
-            // Trip.Days is configured OnDelete(Cascade), so removing the day from
-            // the tracked collection marks the row deleted.
-            trip.Days.Remove(day);
-        }
-
-        var existingDates = trip.Days.Select(d => d.Date).ToHashSet();
-        foreach (var date in targetDates.Where(d => !existingDates.Contains(d)))
-        {
-            trip.Days.Add(new ItineraryDay { TripId = trip.Id, Date = date });
-        }
-
-        var dayNumber = 1;
-        foreach (var day in trip.Days.OrderBy(d => d.Date))
-        {
-            day.DayNumber = dayNumber++;
-        }
     }
 
     public async Task<TripDestinationDto> AddDestinationAsync(Guid tripId, AddDestinationRequest request, CancellationToken cancellationToken = default)
@@ -183,15 +138,13 @@ public class TripService : ITripService
 
         EnsureNotDuplicate(trip, destination.Id, request.ItineraryDayId);
 
-        var bucket = trip.Items.Where(i => i.ItineraryDayId == request.ItineraryDayId).ToList();
-
         var item = new ItineraryItem
         {
             TripId = trip.Id,
             DestinationId = destination.Id,
             Destination = destination,
             ItineraryDayId = request.ItineraryDayId,
-            SortOrder = bucket.Count == 0 ? 0 : bucket.Max(i => i.SortOrder) + 1,
+            SortOrder = trip.NextSortOrderIn(request.ItineraryDayId),
         };
         trip.Items.Add(item);
 
@@ -218,7 +171,7 @@ public class TripService : ITripService
         // within the same day passes.
         EnsureNotDuplicate(trip, item.DestinationId, request.ItineraryDayId, excludeItemId: item.Id);
 
-        MoveItem(trip, item, request.ItineraryDayId, request.SortOrder);
+        trip.MoveItem(item, request.ItineraryDayId, request.SortOrder);
 
         // One save: both affected buckets move atomically.
         await SaveWithDuplicateGuardAsync(trip, cancellationToken);
@@ -227,15 +180,14 @@ public class TripService : ITripService
     }
 
     /// <summary>
-    /// Duplicate rule (US4/US6): a destination appears at most once per day, and at
-    /// most once in the Saved Places bucket. Pass <paramref name="excludeItemId"/>
-    /// when moving an existing item so it cannot conflict with itself.
+    /// Turns the aggregate's duplicate rule (US4/US6) into this layer's vocabulary.
+    /// <see cref="Trip.HasDestinationIn"/> owns the rule; a duplicate being an HTTP
+    /// 409 is a request-level concern, which is why the exception is raised here and
+    /// not in the Domain.
     /// </summary>
     private static void EnsureNotDuplicate(Trip trip, Guid destinationId, Guid? itineraryDayId, Guid? excludeItemId = null)
     {
-        if (trip.Items.Any(i => i.Id != excludeItemId
-                && i.DestinationId == destinationId
-                && i.ItineraryDayId == itineraryDayId))
+        if (trip.HasDestinationIn(destinationId, itineraryDayId, excludeItemId))
         {
             throw new ConflictException(DuplicateDestinationMessage);
         }
@@ -261,41 +213,6 @@ public class TripService : ITripService
         catch (ConcurrencyException)
         {
             throw new ConflictException(DuplicateDestinationMessage);
-        }
-    }
-
-    /// <summary>
-    /// Spec §11.1 US4-US6: move an item into <paramref name="targetDayId"/> (null =
-    /// Saved Places) at <paramref name="sortOrder"/>, then renumber both affected
-    /// buckets 0..n so values stay dense. The position is clamped, so "99" means last.
-    /// </summary>
-    private static void MoveItem(Trip trip, ItineraryItem item, Guid? targetDayId, int sortOrder)
-    {
-        var sourceDayId = item.ItineraryDayId;
-        item.ItineraryDayId = targetDayId;
-
-        var target = trip.Items
-            .Where(i => i.Id != item.Id && i.ItineraryDayId == targetDayId)
-            .OrderBy(i => i.SortOrder)
-            .ToList();
-        target.Insert(Math.Min(sortOrder, target.Count), item);
-        Resequence(target);
-
-        // The bucket the item left keeps its relative order but closes the gap.
-        if (sourceDayId != targetDayId)
-        {
-            Resequence(trip.Items
-                .Where(i => i.Id != item.Id && i.ItineraryDayId == sourceDayId)
-                .OrderBy(i => i.SortOrder)
-                .ToList());
-        }
-    }
-
-    private static void Resequence(List<ItineraryItem> bucket)
-    {
-        for (var position = 0; position < bucket.Count; position++)
-        {
-            bucket[position].SortOrder = position;
         }
     }
 
