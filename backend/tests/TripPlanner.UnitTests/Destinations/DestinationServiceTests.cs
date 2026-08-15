@@ -1,7 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Caching.Memory;
-using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
 using TripPlanner.Application.Common.Exceptions;
@@ -9,8 +8,10 @@ using TripPlanner.Application.Common.Interfaces;
 using TripPlanner.Application.Features.Destinations;
 using TripPlanner.Application.Features.Destinations.Dtos;
 using TripPlanner.Application.Features.Destinations.Validators;
+using TripPlanner.Infrastructure.Caching;
 using TripPlanner.Infrastructure.Persistence;
 using TripPlanner.Infrastructure.Persistence.Repositories;
+using TripPlanner.UnitTests.TestDoubles;
 using Xunit;
 
 namespace TripPlanner.UnitTests.Destinations;
@@ -85,8 +86,13 @@ public class DestinationServiceTests
         FakeClock? clock = null,
         Mock<IImageSearchProvider>? imageSearch = null) =>
         new(new DestinationRepository(db), provider.Object, (imageSearch ?? NoOpImageSearch()).Object,
-            new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions())), clock ?? new FakeClock(),
-            NullLogger<DestinationService>.Instance);
+            // The REAL cache adapter over an in-memory backend: the TTL and
+            // stale-better-than-down tests below only mean something if the value
+            // actually round-trips through serialization.
+            new DistributedStaleTolerantCache(
+                new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions())),
+                new RecordingLogger<DistributedStaleTolerantCache>()),
+            clock ?? new FakeClock());
 
     /// <summary>Shorthand — coordinates don't matter for these tests.</summary>
     private static LocationSuggestionDto Suggestion(string name, string? country = null) =>

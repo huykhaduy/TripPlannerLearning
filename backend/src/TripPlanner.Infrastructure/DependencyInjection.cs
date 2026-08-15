@@ -134,5 +134,11 @@ public static class DependencyInjection
                 ?? ActivatorUtilities.CreateInstance(sp, registration.ImplementationType!));
             return new ResilientDistributedCache(real, sp.GetRequiredService<ILogger<ResilientDistributedCache>>());
         });
+
+        // The Application layer depends on IStaleTolerantCache, not IDistributedCache:
+        // it owns the caching POLICY (TTLs, stale-better-than-down) while the JSON and
+        // byte handling live here. Sits ABOVE the resilient decorator, so a backend
+        // outage is already a plain miss by the time it gets here.
+        services.AddSingleton<IStaleTolerantCache, DistributedStaleTolerantCache>();
     }
 }
