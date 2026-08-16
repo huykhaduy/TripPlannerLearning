@@ -36,9 +36,13 @@ Tài liệu này tập trung vào **cách làm và lý do quyết định**, kh�
 | Frontend | React + TypeScript + Vite + React Router + Axios |
 | Test | xUnit + Moq + EF InMemory + `WebApplicationFactory`; Vitest + React Testing Library |
 
-**Quy mô test:** 347 case backend (279 `Application.Tests` + 68 `WebApi.Tests`), 263 case
-frontend (28 file) — tất cả đều pass. Chạy `dotnet test` và `npm test` để xác nhận lại trước
-khi trình bày.
+**Quy mô test:** 371 case backend (302 `TripPlanner.UnitTests` + 69 `TripPlanner.WebApi.Tests`),
+263 case frontend (28 file) — tất cả đều pass. Chạy `dotnet test` và `npm test` để xác nhận lại
+trước khi trình bày.
+
+`TripPlanner.UnitTests` cố ý **không** soi gương 1-1 với `src/`: một project phủ cả Domain,
+Application **và** Infrastructure, vì cả ba chạy in-process và dùng chung fixture. Chia project
+theo *thứ cần để chạy* (có host hay không), không theo tên tầng.
 
 **API endpoints:**
 
@@ -183,7 +187,20 @@ public interface IUserRepository
 
 Lý do: mỗi request trong hệ này thao tác đúng **một aggregate**, nên không có kịch bản nào cần
 gom nhiều thay đổi vào một transaction do tầng trên điều khiển. Thêm Unit of Work sẽ là một lớp
-trừu tượng không ai dùng tới.
+trừu tượng không ai dùng tới — nhất là khi `DbContext` **bản thân nó đã là** một Unit of Work
+(gom thay đổi, rồi `SaveChangesAsync` đẩy xuống trong một transaction). Bọc thêm một lớp nữa lên
+trên là bọc UoW bằng UoW.
+
+**Đánh đổi phải nói thẳng:** `UpdateAsync(trip)` **không dùng** tham số của nó. Change tracker
+của EF đã giữ sẵn entity từ lúc query, nên hàm chỉ cần flush; tham số ở đó để chỗ gọi đọc thành
+"lưu trip này" thay vì một `SaveChanges()` trơ trọi. Hệ quả là hai điều kiện ẩn, đã được ghi rõ
+trong doc comment của cả interface lẫn implementation:
+
+1. Chỉ đúng với entity nạp bằng query **có tracking** (`GetForUpdateAsync`). Đưa vào một trip lấy
+   từ `GetDetailsAsync` (`AsNoTracking`) thì **không có gì được lưu — và cũng không có lỗi nào**.
+2. Nó flush **mọi thứ** DbContext đang track, không riêng trip này (mọi repository dùng chung một
+   context scoped). Đó chính là lý do `TripService.AddDestinationAsync` phải insert `Destination`
+   **trước** khi chạm vào graph của trip — xem ghi chú ORDER MATTERS ở đó.
 
 ---
 
@@ -656,7 +673,7 @@ Toàn bộ log trong solution (đây là danh sách đầy đủ):
 | `SmtpEmailSender` | Debug | `"SMTP is not configured; skipping email {Subject}."` | bỏ qua (dev chưa cấu hình SMTP là bình thường) |
 | `ResilientDistributedCache` | Warning | `"Distributed cache unavailable during {Operation}..."` | **nuốt** — degrade là đúng hợp đồng của nó |
 | `JwtTokenGenerator` (×3) | Warning | token xác thực không đọc được / sai chữ ký / sai purpose claim | trả về không hợp lệ |
-| `DestinationService` | Warning | `"Discarding a cache entry for {Key}..."` | coi như cache miss |
+| `DistributedStaleTolerantCache` | Warning | `"Discarding a cache entry that no longer matches {Type}."` — **không kèm key** | coi như cache miss |
 
 ### Vì sao adapter phải ném lại chứ không nuốt
 
@@ -747,6 +764,47 @@ sẵn key sẽ bị phân loại là row **đã tồn tại** → phát UPDATE t
 
 Migration `SetIdValueGeneratedNever` **cố ý rỗng** — nó chỉ mang thay đổi metadata vào
 `ApplicationDbContextModelSnapshot`, thứ mà các migration sau diff với. Không được xoá.
+
+### `AsSplitQuery` cho hai query nạp cả graph của trip
+
+`Days` và `Items` **đều** là collection treo trên `Trip`. Include cả hai trong một câu SQL sẽ
+LEFT JOIN từng cái vào dòng trip một cách độc lập — và hai tích join **nhân với nhau**.
+
+Mức phình là **bậc hai theo số item**, không phải `days × items` như trực giác ban đầu: join thứ
+nhất cho ra một dòng cho mỗi cặp (ngày, item trong ngày đó) cộng một dòng cho mỗi ngày trống, rồi
+join thứ hai nhân toàn bộ số đó với **mọi item của trip**. Dưới `AsNoTracking`, mỗi item còn bị
+materialize **hai lần** — một dưới day của nó, một dưới `Trip.Items`.
+
+Số đo thật (SQLite in-memory, chính câu query này, mỗi cấu hình 200 lần chạy):
+
+| Ngày | Item | Dòng SQL trả về | Trước | Sau | Nhanh hơn |
+|---:|---:|---:|---:|---:|---:|
+| 14 | 30 | **900** | 10.65 ms | 1.66 ms | 84% |
+| 7 | 20 | **400** | 4.34 ms | 0.91 ms | 79% |
+| 14 | 5 | 70 | 0.96 ms | 0.56 ms | 41% |
+| 30 | 60 | **3 600** | 41.24 ms | 1.61 ms | 96% |
+| 5 | 0 | 5 | 0.32 ms | 0.31 ms | 3% |
+
+Cả 5 cấu hình đều được kiểm tra hai shape trả về **cùng một graph** (số days, số items, số item
+nằm dưới days đều khớp). Chú ý dòng 30/60: 3 600 dòng SQL cho dữ liệu thực chỉ 90 bản ghi.
+
+**Đọc con số này cho đúng:** cột *dòng SQL trả về* chuyển sang Postgres nguyên vẹn, vì nó do hình
+dạng JOIN quyết định — và SQL sinh cho Npgsql có đúng cấu trúc đó (5 JOIN, 2 757 ký tự; sau khi
+split, câu gốc còn 0 JOIN và 501 ký tự). Cột thời gian thì **không** chuyển thẳng được: đây là
+SQLite in-memory, không có network round trip. Cái đáng tin là *xu hướng* — càng nhiều item,
+khoảng cách càng giãn.
+
+```csharp
+await _context.Trips
+    .AsNoTracking()
+    .AsSplitQuery()          // ← mỗi collection một query, không join chéo
+    .Include(t => t.Days).ThenInclude(d => d.Items).ThenInclude(i => i.Destination)
+    .Include(t => t.Items).ThenInclude(i => i.Destination)
+    .FirstOrDefaultAsync(t => t.Id == tripId && t.UserId == userId, ct);
+```
+
+Đánh đổi: split query là nhiều round trip và **không nguyên tử** nếu không bọc transaction. Chấp
+nhận được ở đây vì một trip chỉ do chính chủ ghi, và hai đường ghi vẫn save trong một transaction.
 
 ---
 
@@ -989,11 +1047,33 @@ HTTP*.
 
 ### "Sao repository không có Unit of Work? Sao mỗi method tự SaveChanges?"
 
-Vì mỗi request trong hệ này thao tác đúng một aggregate. Không có kịch bản nào cần gom nhiều
-thay đổi vào một transaction do tầng trên điều khiển. Ngay cả `UpdateItineraryItemAsync` — thao
-tác chạm hai bucket — vẫn nằm trong một aggregate `Trip`, và code **cố ý gọi một lần
-`UpdateAsync`** để hai bucket đổi nguyên tử. Unit of Work ở đây sẽ là abstraction không ai dùng.
-**Điều gì sẽ đảo ngược:** một use case ghi hai aggregate khác nhau phải cùng thành công/thất bại.
+Hai lý do, lý do thứ nhất quan trọng hơn:
+
+1. **`DbContext` đã là Unit of Work rồi.** Nó gom mọi thay đổi vào change tracker và
+   `SaveChangesAsync` đẩy tất cả xuống trong **một** transaction — đúng định nghĩa của pattern.
+   Thêm `IUnitOfWork` lên trên là bọc một UoW bằng một UoW.
+2. **Không có use case nào cần nó.** Mỗi request thao tác đúng một aggregate. Ngay cả
+   `UpdateItineraryItemAsync` — chạm hai bucket — vẫn nằm trong một aggregate `Trip`, và code
+   **cố ý gọi một lần `UpdateAsync`** để hai bucket đổi nguyên tử. Chỗ duy nhất ghi hai aggregate
+   là `AddDestinationAsync` (`Destination` rồi `Trip`), và ở đó việc tách rời là **có chủ ý**: nếu
+   thêm vào trip hỏng, thứ còn lại là một dòng `Destination` — vốn chỉ là cache dữ liệu Geoapify
+   khoá theo `ProviderId`, lần sau có người thêm đúng địa điểm đó thì dùng lại, đỡ một lần gọi API.
+
+**Điều gì sẽ đảo ngược:** một use case ghi hai aggregate khác nhau mà hỏng một nửa là không chấp
+nhận được. Kể cả lúc đó, một port hẹp kiểu `ITransactionRunner.RunAsync(...)` cũng đủ.
+
+### "Sao `UpdateAsync(trip)` không hề dùng tham số `trip`?"
+
+Vì change tracker của EF đã biết entity đó từ lúc query — truyền vào cũng không thêm thông tin gì.
+Đối chiếu với `AddAsync`: ở đó tham số là **bắt buộc**, vì object vừa `new` chưa được context biết
+tới nên phải `Add()` để đăng ký. Tham số của `UpdateAsync` giữ lại thuần tuý cho chỗ gọi dễ đọc.
+
+Cái giá của nó — và đây mới là phần đáng nói khi bị hỏi: chữ ký hàm **hứa sai hai chiều**. Nó lưu
+*ít* hơn (không gì cả, im lặng, nếu entity được nạp bằng `AsNoTracking`) và *nhiều* hơn (flush cả
+những gì repository khác vừa thêm vào cùng context) so với những gì cái tên gợi ra. Không sửa
+code, nhưng đã viết hẳn hai điều kiện đó vào doc comment của `ITripRepository` / `IUserRepository`
+và cả hai implementation — cảnh báo đặt trên port là quan trọng nhất, vì người viết tầng
+Application chỉ đọc interface chứ không mở Infrastructure ra xem.
 
 ### "Sao không dùng AutoMapper?"
 
@@ -1129,11 +1209,17 @@ sẵn sàng, chỉ thiếu một helper `getFieldErrors(err)` ở `client.ts` v�
 - `ItineraryItem.SortOrder` **không có** unique index — thứ tự được đảm bảo hoàn toàn in-memory
   bằng resequence dày đặc mỗi request, nên hai thao tác reorder đồng thời trên cùng bucket sẽ race.
 
-### 3. Đoạn dịch unique-violation không có test tự động
+### 3. Vài hành vi chỉ có ở provider SQL nên không có test tự động
 
-EF InMemory không enforce unique index, nên `dotnet test` không thể chạm tới nhánh đó. Phải suy
-luận trực tiếp trên provider SQL. Bù lại bằng cách mock `ConcurrencyException` ở ranh giới
-repository để test phần **caller** (xem `AuthServiceTests`).
+EF InMemory không phải Postgres, nên hai chỗ nằm ngoài tầm với của `dotnet test`:
+
+- **Dịch unique-violation**: InMemory không enforce unique index, nên nhánh đó không bao giờ chạy.
+  Bù lại bằng cách mock `ConcurrencyException` ở ranh giới repository để test phần **caller**
+  (xem `AuthServiceTests`).
+- **`AsSplitQuery`**: là API chỉ dành cho relational provider; InMemory **bỏ qua trong im lặng**.
+  Suite vẫn xanh nhưng không chứng minh được gì về hành vi thật trên Npgsql.
+
+Cả hai đều phải suy luận trực tiếp trên provider SQL, và đều đã được ghi chú ngay tại code.
 
 ### 4. Migration chạy tự động lúc khởi động
 

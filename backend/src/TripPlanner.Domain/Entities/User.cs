@@ -15,8 +15,9 @@ public class User : BaseEntity
     public string? DisplayName { get; set; }
 
     /// <summary>
-    /// Feature 4 / US2 — email verification. The reference template creates
-    /// users as verified for simplicity; students can wire up a real flow.
+    /// Feature 4 / US2 — email verification. Registration creates users with this
+    /// false; AuthService.VerifyEmailAsync flips it when the emailed link is opened,
+    /// and LoginAsync refuses (403) until then.
     /// </summary>
     public bool IsEmailVerified { get; set; }
 

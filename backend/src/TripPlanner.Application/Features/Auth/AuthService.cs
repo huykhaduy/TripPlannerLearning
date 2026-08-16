@@ -10,10 +10,11 @@ namespace TripPlanner.Application.Features.Auth;
 
 /// <summary>
 /// ============================================================================
-/// REFERENCE IMPLEMENTATION — read this carefully.
+/// REFERENCE IMPLEMENTATION — read this first.
 /// ============================================================================
-/// This is the one feature slice that is fully built out. It demonstrates the
-/// shape every other use-case in this project should follow:
+/// All three feature slices (Auth, Destinations, Trips) are fully built; this is
+/// the one to study first, because it is the smallest complete example of the
+/// shape every use-case in this project follows:
 ///
 ///   * depend on INTERFACES from the Application layer (IUserRepository,
 ///     IPasswordHasher, IJwtTokenGenerator) — never on EF/Infrastructure types;
@@ -21,7 +22,9 @@ namespace TripPlanner.Application.Features.Auth;
 ///     exceptions (Validation/Conflict/Unauthorized) that the API maps to HTTP;
 ///   * map entities to DTOs so we never leak the password hash to the client.
 ///
-/// Use it as the blueprint for TripService and DestinationService.
+/// TripService and DestinationService add the pieces this slice has no need for:
+/// domain-owned invariants on an aggregate (Trip) and cache-aside over an
+/// external provider, respectively.
 /// </summary>
 public class AuthService : IAuthService
 {
