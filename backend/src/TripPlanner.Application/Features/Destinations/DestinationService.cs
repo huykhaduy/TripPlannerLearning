@@ -190,21 +190,14 @@ public class DestinationService : IDestinationService
     }
 
     /// <summary>
-    /// Serper (Google Images) first, since it finds a photo for far more places
-    /// than the destination provider's own sparse image data; falls back to
-    /// whatever image the caller already had on hand (the provider's own
-    /// thumbnail), and finally to a stale cached gallery rather than blanking
-    /// out photos that used to be there. In practice Serper rarely returns a
-    /// truly empty result, even for an unrelated query, so a non-null hit is a
-    /// best-effort "top hit", not a confirmed match — the later fallbacks
-    /// mostly only fire when Serper itself is unreachable or times out.
+    /// Serper first (it finds a photo for far more places than the destination
+    /// provider does), then the provider's own thumbnail, then a stale cached
+    /// gallery rather than blanking out photos that used to be there.
     ///
-    /// Shared by the attractions list (which only needs the first photo, via
-    /// <see cref="GetAttractionImageAsync"/>) and the details view's carousel
-    /// (up to <see cref="DetailsPhotoCount"/>) under ONE cache entry per place —
-    /// otherwise the two would independently query and cache different "top
-    /// hits" for the same destination, showing a different photo on the list
-    /// than on its own details page.
+    /// ONE cache entry per place, shared by the attractions list (first photo only,
+    /// via <see cref="GetAttractionImageAsync"/>) and the details carousel (up to
+    /// <see cref="DetailsPhotoCount"/>) — otherwise the two would cache different
+    /// "top hits" and show a different photo on the list than on the details page.
     /// </summary>
     private async Task<IReadOnlyList<string>> GetAttractionImagesAsync(string providerId, string name, string? providerImage, CancellationToken cancellationToken)
     {
@@ -309,12 +302,8 @@ public class DestinationService : IDestinationService
         var details = await GetCachedProviderDetailsAsync(providerId, cancellationToken);
         if (details is not null)
         {
-            // Geoapify's own image data is sparse (see EnrichWithImagesAsync) — the
-            // attractions list already papers over that with a Serper lookup, and
-            // F2/US2 wants a full photo gallery here, not just one thumbnail.
-            // GetAttractionImagesAsync already falls back to details.ImageUrl
-            // internally when Serper finds nothing, so images.FirstOrDefault()
-            // is never actually behind details.ImageUrl here.
+            // F2/US2 wants a gallery here, not one thumbnail. Passing details.ImageUrl
+            // in means the helper's own fallback covers the "Serper found nothing" case.
             var images = await GetAttractionImagesAsync(details.ProviderId, details.Name, details.ImageUrl, cancellationToken);
             return details with { ImageUrl = images.FirstOrDefault(), ImageUrls = images };
         }

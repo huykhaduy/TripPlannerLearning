@@ -29,14 +29,9 @@ public class UserRepository : IUserRepository
     }
 
     /// <summary>
-    /// The user is already tracked, so this only needs to flush. The parameter stays
-    /// for a readable call site — it is deliberately unused, and the flush covers
-    /// everything the scoped DbContext is tracking, not only this user.
-    ///
-    /// Only valid for a user loaded by a TRACKING query (GetByIdAsync /
-    /// GetByEmailAsync, neither of which uses AsNoTracking). A detached user would
-    /// be saved silently as a no-op — see TripRepository.UpdateAsync for the same
-    /// trap spelled out in full.
+    /// Only flushes; <paramref name="user"/> is unused. Valid only for a user from
+    /// the getters above (none use AsNoTracking) — a detached one saves as a silent
+    /// no-op. Same trap as TripRepository.UpdateAsync, explained there.
     /// </summary>
     public async Task UpdateAsync(User user, CancellationToken cancellationToken = default) =>
         await _context.SaveChangesAsync(cancellationToken);

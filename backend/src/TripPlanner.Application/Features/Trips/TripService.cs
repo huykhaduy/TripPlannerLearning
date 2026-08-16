@@ -194,15 +194,12 @@ public class TripService : ITripService
     }
 
     /// <summary>
-    /// Saves the trip aggregate, translating a unique-index violation on
-    /// (ItineraryDayId, DestinationId) into the same conflict
-    /// <see cref="EnsureNotDuplicate"/> raises — that index is the backstop for a
-    /// concurrent request slipping the same destination in between the check and
-    /// the save.
+    /// Saves, translating a unique-index violation on (ItineraryDayId, DestinationId)
+    /// into the same conflict <see cref="EnsureNotDuplicate"/> raises — the index is
+    /// the backstop for a concurrent request slipping in between check and save.
     ///
-    /// Only for the two paths that add or move an item. <c>UpdateTripAsync</c>
-    /// deliberately saves directly: a date change cannot violate that index, so
-    /// reporting "duplicate destination" there would be a lie.
+    /// Only for the add/move paths. <c>UpdateTripAsync</c> saves directly, because a
+    /// date change cannot violate that index and reporting a duplicate would be a lie.
     /// </summary>
     private async Task SaveWithDuplicateGuardAsync(Trip trip, CancellationToken cancellationToken)
     {
@@ -272,14 +269,10 @@ public class TripService : ITripService
     }
 
     /// <summary>
-    /// The provider's own image data is sparse (Geoapify only has wiki_and_media for
-    /// some places), so fall back to a Serper image search by name — the same source
-    /// the attraction cards use, so a saved destination isn't stuck showing the
-    /// placeholder icon everywhere.
-    ///
-    /// Best-effort by design: a Serper outage leaves the destination saved without a
-    /// photo rather than failing the add. Does nothing if the provider already gave
-    /// us an image.
+    /// The provider's image data is sparse, so fall back to a Serper search by name —
+    /// the same source the attraction cards use, so a saved destination isn't stuck
+    /// showing the placeholder icon. Best-effort by design: a Serper outage leaves the
+    /// destination saved without a photo rather than failing the add.
     /// </summary>
     private async Task TryFillMissingImageAsync(Destination destination, CancellationToken cancellationToken)
     {
