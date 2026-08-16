@@ -14,7 +14,7 @@ Tài liệu này tập trung vào **cách làm và lý do quyết định**, kh�
 6. [Validation](#6-validation)
 7. [Cache hoạt động như thế nào](#7-cache-hoạt-động-như-thế-nào)
 8. [Logging](#8-logging)
-9. [Concurrency](#9-concurrency)
+9. [Concurrency & chi tiết EF Core](#9-concurrency--chi-tiết-ef-core)
 10. [Frontend gọi API như thế nào](#10-frontend-gọi-api-như-thế-nào)
 11. [Testing](#11-testing)
 12. [Configuration & secrets](#12-configuration--secrets)
@@ -711,7 +711,7 @@ thuộc tính query được, không phải text phẳng.
 
 ---
 
-## 9. Concurrency
+## 9. Concurrency & chi tiết EF Core
 
 ### Chiến lược: unique index ở DB + catch/retry, không dùng lock ở tầng app
 
@@ -765,18 +765,140 @@ sẵn key sẽ bị phân loại là row **đã tồn tại** → phát UPDATE t
 Migration `SetIdValueGeneratedNever` **cố ý rỗng** — nó chỉ mang thay đổi metadata vào
 `ApplicationDbContextModelSnapshot`, thứ mà các migration sau diff với. Không được xoá.
 
-### `AsSplitQuery` cho hai query nạp cả graph của trip
+### `AsSplitQuery` — cartesian explosion và cách EF Core sinh SQL
 
-`Days` và `Items` **đều** là collection treo trên `Trip`. Include cả hai trong một câu SQL sẽ
-LEFT JOIN từng cái vào dòng trip một cách độc lập — và hai tích join **nhân với nhau**.
+Đây là phần đáng đào sâu nhất về EF Core trong dự án, vì nó là một cái bẫy mà tên gọi không hề
+gợi ra, và nhìn code thì không thấy gì bất thường.
 
-Mức phình là **bậc hai theo số item**, không phải `days × items` như trực giác ban đầu: join thứ
-nhất cho ra một dòng cho mỗi cặp (ngày, item trong ngày đó) cộng một dòng cho mỗi ngày trống, rồi
-join thứ hai nhân toàn bộ số đó với **mọi item của trip**. Dưới `AsNoTracking`, mỗi item còn bị
-materialize **hai lần** — một dưới day của nó, một dưới `Trip.Items`.
+#### Gốc rễ: SQL chỉ biết trả về bảng phẳng
 
-Bằng chứng ở tầng SQL, lấy bằng `ToQueryString()` nên không cần DB chạy: câu gốc **5 JOIN /
-2 757 ký tự**, sau khi split còn **0 JOIN / 501 ký tự**.
+`Trip` có **hai** collection — `Days` và `Items`. Query nạp chi tiết trip cần cả hai:
+
+```csharp
+.Include(t => t.Days).ThenInclude(d => d.Items).ThenInclude(i => i.Destination)
+.Include(t => t.Items).ThenInclude(i => i.Destination)
+```
+
+Mặc định EF gom tất cả vào **một câu SQL**. Nhưng SQL chỉ trả về được một bảng phẳng, không trả về
+được cấu trúc lồng nhau. Nên nó buộc phải `LEFT JOIN` từng nhánh vào dòng trip:
+
+```sql
+FROM Trips t
+LEFT JOIN (ItineraryDays ⋈ ItineraryItems ⋈ Destinations) AS s0 ON t.Id = s0.TripId
+LEFT JOIN (ItineraryItems ⋈ Destinations)                 AS s1 ON t.Id = s1.TripId
+```
+
+`s0` và `s1` **không có điều kiện nào ràng buộc lẫn nhau** — cả hai chỉ nối vào `t`. Database vì
+thế phải ghép **mọi dòng của `s0` với mọi dòng của `s1`**. Đó là tích Descartes, và tên gọi của
+hiện tượng này là *cartesian explosion*.
+
+Thử một trip tí hon để đếm tay: 2 ngày, 3 địa điểm (ngày 1 có A và B, ngày 2 có C).
+
+| | `s1` = A | `s1` = B | `s1` = C |
+|---|---|---|---|
+| `s0` = (ngày 1, A) | ✓ | ✓ | ✓ |
+| `s0` = (ngày 1, B) | ✓ | ✓ | ✓ |
+| `s0` = (ngày 2, C) | ✓ | ✓ | ✓ |
+
+**9 dòng** cho dữ liệu thật chỉ gồm 1 trip + 2 ngày + 3 item. Và con số 9 chưa phải chỗ tốn nhất:
+**mỗi dòng trong 9 dòng đó chở theo toàn bộ cột** của trip, của ngày, của item *và* của
+destination — tức cả `Address`, `Description`, `ImageUrl`, `Website`, `OpeningHours`. Cùng một
+destination được gửi qua dây nhiều lần.
+
+#### Vì sao là bậc hai theo item, không phải `ngày × item`
+
+Trực giác ban đầu hay đoán `days × items`. Đếm kỹ thì không phải:
+
+- `s0` = một dòng cho **mỗi cặp (ngày, item trong ngày đó)**, cộng một dòng cho mỗi **ngày trống**
+  (`LEFT JOIN` giữ lại ngày không có item). Nếu mọi item đều đã xếp lịch thì `s0` ≈ số item.
+- `s1` = **mọi item** của trip.
+
+Nhân lại: `(items + ngày trống) × items` — **số ngày gần như không ảnh hưởng, số item mới là thủ
+phạm**. Bảng đo bên dưới xác nhận: 14 ngày/60 item và 30 ngày/60 item đều ra đúng 3 600 dòng.
+
+#### Hai nhánh `Include` trùng nhau — và vì sao vẫn giữ
+
+Nhìn kỹ sẽ thấy hai nhánh chồng lên nhau. Nguyên nhân nằm ở model: `ItineraryItem` mang **cả hai**
+khoá.
+
+```csharp
+public Guid  TripId         { get; set; }   // luôn có
+public Guid? ItineraryDayId { get; set; }   // null = Saved Places
+```
+
+Nên `day.Items` là một **tập con** của `trip.Items`:
+
+| | Nhánh `Days → Items → Destinations` | Nhánh `Items → Destinations` |
+|---|---|---|
+| Dòng `ItineraryDays` | ✅ chỉ nhánh này có | — |
+| Dòng `ItineraryItems` | chỉ item **đã xếp lịch** | **mọi** item |
+| Dòng `Destinations` | của các item đã xếp | của mọi item |
+
+Thứ duy nhất nhánh đầu đóng góp riêng là **bản thân các dòng `ItineraryDays`** (`Date`,
+`DayNumber`). Phần item và destination trong nó là dữ liệu lấy lại lần hai. EF không tự nhận ra
+điều đó vì ta khai báo hai đường điều hướng riêng biệt, và nó dịch từng đường một — nó không suy
+luận "hai đường này cùng về một bảng, gộp đi".
+
+Vẫn giữ nhánh trùng vì `TripMappings.ToDayDto` đang đọc `day.Items` để dựng DTO cho từng ngày.
+
+**Cái bẫy cần nhớ:** bỏ nhánh trùng đi **không** chữa được cartesian explosion. Còn lại
+`Include(t => t.Days)` và `Include(t => t.Items)` thì vẫn là **hai collection cùng cấp** → vẫn
+tích chéo `days × items`. Bỏ nhánh trùng chỉ giúp bớt dữ liệu lặp, không thay bản chất.
+
+#### `AsSplitQuery` làm gì
+
+Nó bảo EF: đừng nhồi vào một câu, **tách mỗi collection thành một câu riêng**.
+
+```
+Câu 1:  SELECT trip                          →  1 dòng
+Câu 2:  SELECT days + items + destinations   →  3 dòng
+Câu 3:  SELECT items + destinations          →  3 dòng
+```
+
+7 dòng thay vì 9, và không dòng nào lặp lại cột của trip. EF **tự ghép** ba kết quả lại trong bộ
+nhớ thành đúng một object `Trip` với `Days` và `Items` đầy đủ — **code gọi không thấy khác biệt
+gì**. Chính vì không thấy khác biệt nên benchmark phải kiểm cột "same graph": một query nhanh hơn
+mà trả về khác dữ liệu thì vô giá trị.
+
+Bản chất của lựa chọn: **đổi ít round trip lấy nhiều dữ liệu lặp, hoặc ngược lại.**
+
+#### Một hệ quả tinh tế: identity resolution
+
+`AsNoTracking()` **không** làm identity resolution. Nghĩa là cùng một `ItineraryItem` sẽ được tạo
+thành **hai object khác nhau** trong bộ nhớ — một nằm trong `day.Items`, một nằm trong
+`trip.Items`. Ở `GetDetailsAsync` điều này vô hại (mapping đọc mỗi bucket từ một nguồn riêng), chỉ
+tốn bộ nhớ.
+
+Nhưng `GetForUpdateAsync` thì **có tracking**, nên EF gộp về **một** object duy nhất. Đó là điều
+kiện để `Trip.MoveItem` sửa một item trong `trip.Items` mà `day.Items` cũng thấy thay đổi ngay.
+Nếu ai đó thêm `AsNoTracking()` vào `GetForUpdateAsync` cho "nhẹ hơn", các đường ghi sẽ hỏng theo
+kiểu rất khó lần ra.
+
+#### Muốn xuống một câu mà không có tích chéo thì phải làm gì
+
+Chỉ có một cách: bỏ `Include` mà dùng **projection** — `Select` thẳng ra DTO. Khi đó EF chỉ kéo
+đúng các cột cần và tự sinh subquery cho từng collection, không tích chéo.
+
+Đổi lại phải viết tay hình dạng projection, và kết quả **không còn là entity** nên `TripService`
+không gọi được `Trip.MoveItem` lên nó. Vì vậy cách này chỉ hợp cho đường **đọc**
+(`GetDetailsAsync`), không dùng được cho `GetForUpdateAsync`. Dự án giữ `Include` cho cả hai để
+hai đường đọc chung một hình dạng query.
+
+#### Quy tắc nhớ
+
+> Chỉ cần nghĩ tới `AsSplitQuery` khi query có **từ hai `Include` trỏ tới collection trở lên, ở
+> cùng một cấp**.
+
+Một chuỗi `Include` dài nhưng **đơn tuyến** (`Trip → Items → Destination`) thì **không** dính, vì
+mỗi item chỉ có một destination — quan hệ một-một không sinh tích chéo. Nó chỉ nổ khi có hai nhánh
+song song cùng treo trên một gốc.
+
+Trong repo này chỉ có đúng hai query rơi vào trường hợp đó, cả hai đều ở `TripRepository`.
+
+#### Bằng chứng ở tầng SQL
+
+Lấy bằng `ToQueryString()` nên không cần database chạy: câu gốc **5 JOIN / 2 757 ký tự**, sau khi
+split thì câu đầu còn **0 JOIN / 501 ký tự**.
 
 ### Số đo thật trên Postgres
 
