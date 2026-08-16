@@ -775,24 +775,58 @@ nhất cho ra một dòng cho mỗi cặp (ngày, item trong ngày đó) cộng 
 join thứ hai nhân toàn bộ số đó với **mọi item của trip**. Dưới `AsNoTracking`, mỗi item còn bị
 materialize **hai lần** — một dưới day của nó, một dưới `Trip.Items`.
 
-Số đo thật (SQLite in-memory, chính câu query này, mỗi cấu hình 200 lần chạy):
+Bằng chứng ở tầng SQL, lấy bằng `ToQueryString()` nên không cần DB chạy: câu gốc **5 JOIN /
+2 757 ký tự**, sau khi split còn **0 JOIN / 501 ký tự**.
 
-| Ngày | Item | Dòng SQL trả về | Trước | Sau | Nhanh hơn |
-|---:|---:|---:|---:|---:|---:|
-| 14 | 30 | **900** | 10.65 ms | 1.66 ms | 84% |
-| 7 | 20 | **400** | 4.34 ms | 0.91 ms | 79% |
-| 14 | 5 | 70 | 0.96 ms | 0.56 ms | 41% |
-| 30 | 60 | **3 600** | 41.24 ms | 1.61 ms | 96% |
-| 5 | 0 | 5 | 0.32 ms | 0.31 ms | 3% |
+### Số đo thật trên Postgres
 
-Cả 5 cấu hình đều được kiểm tra hai shape trả về **cùng một graph** (số days, số items, số item
-nằm dưới days đều khớp). Chú ý dòng 30/60: 3 600 dòng SQL cho dữ liệu thực chỉ 90 bản ghi.
+Đo bằng `TripPlanner.QueryBenchmarks` (xem dưới), 200 lần chạy mỗi cấu hình, Postgres 17. Cột
+*dòng SQL* khớp đúng công thức `(items + ngày trống) × items`:
 
-**Đọc con số này cho đúng:** cột *dòng SQL trả về* chuyển sang Postgres nguyên vẹn, vì nó do hình
-dạng JOIN quyết định — và SQL sinh cho Npgsql có đúng cấu trúc đó (5 JOIN, 2 757 ký tự; sau khi
-split, câu gốc còn 0 JOIN và 501 ký tự). Cột thời gian thì **không** chuyển thẳng được: đây là
-SQLite in-memory, không có network round trip. Cái đáng tin là *xu hướng* — càng nhiều item,
-khoảng cách càng giãn.
+| Ngày | Item | Bản ghi thật | Dòng SQL | Một query | Split query | Chênh |
+|---:|---:|---:|---:|---:|---:|---:|
+| 14 | 0 | 14 | 14 | 1.81 ms | 3.47 ms | **chậm hơn 92%** |
+| 14 | 5 | 19 | 70 | 2.32 ms | 3.63 ms | **chậm hơn 57%** |
+| 14 | 10 | 24 | 140 | 2.95 ms | 3.71 ms | **chậm hơn 26%** |
+| 14 | 15 | 29 | 225 | 4.42 ms | 3.01 ms | nhanh hơn 32% |
+| 14 | 20 | 34 | 400 | 4.27 ms | 3.03 ms | nhanh hơn 29% |
+| 14 | 30 | 44 | 900 | 7.81 ms | 3.08 ms | nhanh hơn 61% |
+| 14 | 60 | 74 | 3 600 | 29.21 ms | 3.19 ms | nhanh hơn 89% |
+| 30 | 60 | 90 | 3 600 | 29.44 ms | 3.68 ms | nhanh hơn 88% |
+
+**Đây là một đánh đổi, không phải cải thiện thuần tuý** — và đó là thứ chỉ số đo trên engine thật
+mới lộ ra:
+
+- **Split query gần như phẳng ~3–3.7 ms** bất kể dữ liệu lớn cỡ nào. Nó là 3 round trip, và chi
+  phí đó là hằng số.
+- **Một query thì tăng theo số dòng**, từ 1.8 ms lên 29 ms.
+- **Điểm hoà vốn nằm giữa 10 và 15 item.** Dưới ngưỡng đó, split **chậm hơn** — nhưng chậm một
+  lượng có trần, khoảng 1–1.5 ms tuyệt đối. Trên ngưỡng, phần tiết kiệm tăng theo bình phương:
+  ở 60 item là 26 ms.
+
+Chọn split vì hình dạng rủi ro: mất tối đa ~1.5 ms ở trip nhỏ, đổi lấy việc trip lớn không bao giờ
+rơi xuống 29 ms. Với một app mà mục đích chính là gom thật nhiều địa điểm vào một chuyến đi, phía
+đắt là phía cần chặn.
+
+**Một cảnh báo khi đọc bảng:** đo trên localhost, độ trễ mạng gần như bằng 0. Nếu app và DB nằm
+khác máy, phạt 3 round trip sẽ lớn hơn và điểm hoà vốn dịch lên cao hơn 15 item.
+
+### Đo lại được
+
+`backend/tests/TripPlanner.QueryBenchmarks` giữ nguyên phép đo này để chạy lại bất cứ lúc nào:
+
+```bash
+docker compose up -d && dotnet run --project backend/tests/TripPlanner.QueryBenchmarks
+```
+
+Nó seed dữ liệu **trong một transaction rồi rollback**, nên chạy thẳng vào database dev cũng không
+để lại gì. Với mỗi cấu hình nó in số dòng SQL, thời gian trung bình của cả hai shape trên 200 lần
+chạy, và kiểm tra hai shape trả về **cùng một graph** — một query nhanh hơn nhưng trả về khác dữ
+liệu thì vô giá trị.
+
+Đây không phải test: `dotnet test` không chạy nó (không có test SDK), vì benchmark có thời gian
+chạy dao động, không nên làm suite đỏ. Nó tồn tại chính vì suite **không thể** kiểm chỗ này — EF
+InMemory không phải relational nên bỏ qua `AsSplitQuery` trong im lặng.
 
 ```csharp
 await _context.Trips

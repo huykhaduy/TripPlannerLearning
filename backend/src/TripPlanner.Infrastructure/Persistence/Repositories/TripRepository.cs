@@ -22,26 +22,17 @@ public class TripRepository : ITripRepository
             .ToListAsync(cancellationToken);
 
     /// <summary>
-    /// Split into one query per collection. Days and Items are BOTH collections
-    /// hanging off Trip, so a single-query include LEFT JOINs each of them onto the
-    /// trip row independently — and the two join products multiply.
+    /// AsSplitQuery because Days and Items are both collections off Trip: in one
+    /// statement they multiply into (items + empty days) × items rows — 900 for a
+    /// 44-record trip, 3600 for 90 — with every item materialised twice.
     ///
-    /// The blow-up is QUADRATIC IN THE ITEM COUNT, not days × items: the first join
-    /// yields one row per (day, item-in-that-day) plus one per empty day, and the
-    /// second multiplies all of that by every item in the trip. Measured against
-    /// SQLite with this exact query: 30 items over 14 days = 900 rows; 60 items over
-    /// 30 days = 3600 rows. On top of that, under AsNoTracking every item is
-    /// materialised twice — once under its day, once under Trip.Items.
+    /// A trade-off, not a free win: three round trips cost a flat ~3.5 ms, so below
+    /// ~10-15 items the single query is the faster one. Chosen because that loss has
+    /// a ceiling and the win does not. (Split reads are also non-atomic without an
+    /// explicit transaction — fine here, a trip is only written by its owner.)
     ///
-    /// The trade-off: split queries are several round trips and are NOT atomic
-    /// unless wrapped in an explicit transaction, so a concurrent write could in
-    /// principle land between them. Accepted here — a trip is only ever written by
-    /// its own owner, and the two mutating paths save inside one transaction anyway.
-    ///
-    /// Note that no test covers this: AsSplitQuery is a relational-only API and the
-    /// EF InMemory provider used by the suite ignores it, so the behaviour has to be
-    /// reasoned about against Npgsql directly (same caveat as the unique-index
-    /// translation in ApplicationDbContext).
+    /// EF InMemory ignores AsSplitQuery, so no test covers this. Re-measure with
+    /// tests/TripPlanner.QueryBenchmarks if this query or the database host changes.
     /// </summary>
     public async Task<Trip?> GetDetailsAsync(Guid tripId, Guid userId, CancellationToken cancellationToken = default) =>
         await _context.Trips
@@ -74,22 +65,14 @@ public class TripRepository : ITripRepository
     }
 
     /// <summary>
-    /// The trip and its days/items are already tracked, so this only needs to flush —
-    /// EF writes the whole graph in one transaction.
+    /// Only flushes — the graph is already tracked and EF writes it in one
+    /// transaction. Two things the signature hides:
     ///
-    /// Two things the signature does not say, and both matter:
-    ///
-    /// 1. The <paramref name="trip"/> argument is deliberately unused. The change
-    ///    tracker already knows the entity; the parameter is here so the call site
-    ///    reads as "save this trip" rather than a bare SaveChanges. The corollary is
-    ///    that this ONLY works for a trip loaded by a TRACKING query, i.e.
-    ///    GetForUpdateAsync. Hand it one from GetDetailsAsync (AsNoTracking) and
-    ///    nothing is written — no UPDATE, no exception, no log.
-    ///
-    /// 2. It flushes everything the scoped DbContext is tracking, not just this
-    ///    trip — every repository shares one context. That is why
-    ///    TripService.AddDestinationAsync must insert its Destination BEFORE it
-    ///    touches the trip graph; see the ORDER MATTERS note there.
+    /// 1. <paramref name="trip"/> is unused, and this works ONLY for a trip from
+    ///    GetForUpdateAsync. Pass one from GetDetailsAsync (AsNoTracking) and nothing
+    ///    is written — no UPDATE, no exception, no log.
+    /// 2. It flushes everything the scoped DbContext tracks, not just this trip —
+    ///    hence the ORDER MATTERS note in TripService.AddDestinationAsync.
     /// </summary>
     public async Task UpdateAsync(Trip trip, CancellationToken cancellationToken = default) =>
         await _context.SaveChangesAsync(cancellationToken);

@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    NOT a test project — a console app you run by hand. It lives here because it
+    exercises the same code the tests do, but `dotnet test` will not execute it
+    (no test SDK, no IsTestProject), so it can never slow down or destabilise the
+    suite. See the header of Program.cs for how to run it (an XML comment cannot
+    hold the command line, which contains a double hyphen).
+
+    No PackageReference of its own on purpose: Npgsql arrives through
+    Infrastructure, and this project measures Postgres because Postgres is the
+    only database this app supports. Reaching for SQLite here would introduce a
+    second provider that ships nowhere else in the repo.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>TripPlanner.QueryBenchmarks</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\TripPlanner.Infrastructure\TripPlanner.Infrastructure.csproj" />
+  </ItemGroup>
+
+</Project>
