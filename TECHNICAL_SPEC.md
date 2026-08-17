@@ -111,7 +111,7 @@ backend/
     TripPlanner.Infrastructure/    # EF Core, JWT, BCrypt, Geoapify client, migrations
     TripPlanner.WebApi/            # controllers, middleware, Program.cs (no appsettings.json — see §10 Configuration summary)
   tests/
-    TripPlanner.Application.Tests/ # Auth/, Trips/, Destinations/, Repositories/, Identity/ — 5 classes, 77 tests
+    TripPlanner.UnitTests/ # Auth/, Trips/, Destinations/, Repositories/, Identity/ — 5 classes, 77 tests
 frontend/
   src/
     api/          # client.ts (axios + JWT interceptor + 401 logout interceptor),
@@ -1008,16 +1008,16 @@ rather than being mapped to 409.
 
 ### Testing [Observed]
 
-Five test classes under `backend/tests/TripPlanner.Application.Tests/`, **78 tests
+Five test classes under `backend/tests/TripPlanner.UnitTests/`, **78 tests
 total, all passing** (`dotnet test`):
 
 | Class | Tests | Covers |
 |---|---|---|
-| [AuthServiceTests](backend/tests/TripPlanner.Application.Tests/Auth/AuthServiceTests.cs) | 13 | Register (success/duplicate email/short password, no session issued), login (success when verified/wrong password even when unverified/**blocked with 403 when unverified**), email verification (send-on-register, send failure doesn't block registration, verify with valid/invalid token, resend for unknown/already-verified/unverified emails) |
-| [TripServiceTests](backend/tests/TripPlanner.Application.Tests/Trips/TripServiceTests.cs) | 27 | Create/list (including NFR 6 ownership filtering and newest-first ordering), full add/move/reorder/schedule coverage, day regeneration on date changes, duplicate-in-bucket conflicts |
-| [DestinationServiceTests](backend/tests/TripPlanner.Application.Tests/Destinations/DestinationServiceTests.cs) | 29 | Search/attractions/details (F1 US1-3, F2 US1), validation errors, cache hit/miss/expiry (via a fake `TimeProvider`), stale-on-provider-outage fallback, image enrichment |
-| [RepositoryTests](backend/tests/TripPlanner.Application.Tests/Repositories/RepositoryTests.cs) | 5 | Generic `Repository<T>` + `UnitOfWork` only (add/get/get-all), using `Destination` as a stand-in entity — no dedicated `TripRepository`/`UserRepository` named-query tests exist; those queries are exercised indirectly through `TripServiceTests`/`AuthServiceTests` |
-| [JwtTokenGeneratorTests](backend/tests/TripPlanner.Application.Tests/Identity/JwtTokenGeneratorTests.cs) | 4 | The **real** `JwtTokenGenerator` (the other classes mock `IJwtTokenGenerator`) — email-verification token round-trip, garbage-token rejection, and rejecting a normal access token replayed as a verification token |
+| [AuthServiceTests](backend/tests/TripPlanner.UnitTests/Auth/AuthServiceTests.cs) | 13 | Register (success/duplicate email/short password, no session issued), login (success when verified/wrong password even when unverified/**blocked with 403 when unverified**), email verification (send-on-register, send failure doesn't block registration, verify with valid/invalid token, resend for unknown/already-verified/unverified emails) |
+| [TripServiceTests](backend/tests/TripPlanner.UnitTests/Trips/TripServiceTests.cs) | 27 | Create/list (including NFR 6 ownership filtering and newest-first ordering), full add/move/reorder/schedule coverage, day regeneration on date changes, duplicate-in-bucket conflicts |
+| [DestinationServiceTests](backend/tests/TripPlanner.UnitTests/Destinations/DestinationServiceTests.cs) | 29 | Search/attractions/details (F1 US1-3, F2 US1), validation errors, cache hit/miss/expiry (via a fake `TimeProvider`), stale-on-provider-outage fallback, image enrichment |
+| [RepositoryTests](backend/tests/TripPlanner.UnitTests/Repositories/RepositoryTests.cs) | 5 | Generic `Repository<T>` + `UnitOfWork` only (add/get/get-all), using `Destination` as a stand-in entity — no dedicated `TripRepository`/`UserRepository` named-query tests exist; those queries are exercised indirectly through `TripServiceTests`/`AuthServiceTests` |
+| [JwtTokenGeneratorTests](backend/tests/TripPlanner.UnitTests/Identity/JwtTokenGeneratorTests.cs) | 4 | The **real** `JwtTokenGenerator` (the other classes mock `IJwtTokenGenerator`) — email-verification token round-trip, garbage-token rejection, and rejecting a normal access token replayed as a verification token |
 
 Pattern (all classes): fresh EF InMemory database per test (`Guid.NewGuid()` database
 name), real validators/hashers where cheap, `Mock<T>` (Moq) for external providers and
@@ -1179,7 +1179,7 @@ re-derive it. Interfaces, DTOs, routes, and the DB schema already exist; impleme
    search/details; do not persist search results.
 7. **Definition of done per feature** (from ASSIGNMENT.md): acceptance criteria met;
    rules in Application/Domain (not controllers); user-filtered queries; ≥1 unit test
-   per new service behavior following the [AuthServiceTests](backend/tests/TripPlanner.Application.Tests/Auth/AuthServiceTests.cs)
+   per new service behavior following the [AuthServiceTests](backend/tests/TripPlanner.UnitTests/Auth/AuthServiceTests.cs)
    pattern; UI handles loading/empty/error states.
 
 ---

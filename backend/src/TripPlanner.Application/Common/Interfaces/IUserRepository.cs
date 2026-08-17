@@ -17,6 +17,9 @@ public interface IUserRepository
     /// <summary>Inserts the user and persists immediately.</summary>
     Task AddAsync(User user, CancellationToken cancellationToken = default);
 
-    /// <summary>Persists pending changes to an already-loaded user.</summary>
+    /// <summary>
+    /// Persists pending changes to a user loaded by one of the getters above.
+    /// A user built by hand, or otherwise detached, is saved as a silent no-op.
+    /// </summary>
     Task UpdateAsync(User user, CancellationToken cancellationToken = default);
 }

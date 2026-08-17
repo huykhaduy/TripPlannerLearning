@@ -12,9 +12,13 @@ namespace TripPlanner.Application.Common.Interfaces;
 public interface ITripRepository
 {
     /// <summary>Projected list rows for GetMyTripsAsync — see TripMappings.ToSummaryRowExpression.</summary>
-    Task<List<TripSummaryRow>> GetSummaryRowsForUserAsync(Guid userId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<TripSummaryRow>> GetSummaryRowsForUserAsync(Guid userId, CancellationToken cancellationToken = default);
 
-    /// <summary>Read-only, full graph (Days.Items.Destination + Items.Destination) — for GetTripAsync.</summary>
+    /// <summary>
+    /// Read-only, full graph (Days.Items.Destination + Items.Destination) — for GetTripAsync.
+    /// Detached: mutating what this returns and calling <see cref="UpdateAsync"/> saves
+    /// NOTHING, silently. Use <see cref="GetForUpdateAsync"/> for any write path.
+    /// </summary>
     Task<Trip?> GetDetailsAsync(Guid tripId, Guid userId, CancellationToken cancellationToken = default);
 
     /// <summary>Full graph loaded for mutation; changes to Days/Items are persisted by UpdateAsync.</summary>
@@ -29,7 +33,10 @@ public interface ITripRepository
     /// <summary>Inserts the trip and persists immediately.</summary>
     Task AddAsync(Trip trip, CancellationToken cancellationToken = default);
 
-    /// <summary>Persists every pending change to the trip and its days/items in one save.</summary>
+    /// <summary>
+    /// Persists every pending change to the trip and its days/items in one save.
+    /// Requires a trip from <see cref="GetForUpdateAsync"/>.
+    /// </summary>
     Task UpdateAsync(Trip trip, CancellationToken cancellationToken = default);
 
     /// <summary>Deletes a single itinerary item and persists immediately.</summary>

@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using TripPlanner.Application.Common.Exceptions;
 using TripPlanner.Application.Common.Interfaces;
 using TripPlanner.Application.Features.Destinations.Dtos;
 
@@ -14,23 +15,13 @@ namespace TripPlanner.Infrastructure.ExternalApis;
 /// The concrete <see cref="IDestinationProvider"/>, backed by the Geoapify
 /// Geocoding and Places APIs (https://apidocs.geoapify.com/docs) via a typed
 /// <see cref="HttpClient"/> (configured in DependencyInjection, base address
-/// https://api.geoapify.com/).
+/// https://api.geoapify.com/). Each method builds its own URL — the per-endpoint
+/// quirks are noted where they are used, not duplicated here.
 ///
-/// Endpoint map:
-///   * SearchLocationsAsync        → GET v1/geocode/autocomplete?text={query}&amp;limit=10&amp;apiKey={key}
-///                                     (no type= restriction — countries must surface too;
-///                                      over-fetches 10 because result_type filtering discards
-///                                      streets/districts, and DestinationService caps at 5)
-///   * GetAttractionsAsync         → GET v2/places?categories={AttractionCategories}
-///                                        &amp;filter=circle:{lon},{lat},{radiusMeters}&amp;limit=20&amp;apiKey={key}
-///                                     (note: Geoapify wants LON before LAT, and radius in METERS)
-///   * GetDestinationDetailsAsync  → GET v2/place-details?id={placeId}&amp;apiKey={key}
-///
-/// Deserializes responses into private DTOs via System.Text.Json, then maps to
+/// Responses deserialize into the private wire DTOs at the bottom, then map to
 /// the public DTOs in Application. Geoapify has no ratings and few images, so
-/// Rating/ImageUrl are often null (the UI shows placeholders); the API key
-/// comes from configuration ("Geoapify:ApiKey" — a free key at
-/// https://myprojects.geoapify.com/).
+/// Rating/ImageUrl are often null (the UI shows placeholders); the API key comes
+/// from "Geoapify:ApiKey" (a free key at https://myprojects.geoapify.com/).
 /// </summary>
 public class GeoapifyClient : IDestinationProvider
 {
@@ -64,17 +55,22 @@ public class GeoapifyClient : IDestinationProvider
     }
 
     /// <summary>
-    /// Logs a transient failure and rethrows — the caller decides the fallback
-    /// (DestinationService serves a stale cache entry when it has one).
+    /// Logs a transient failure and converts it to
+    /// <see cref="ExternalServiceUnavailableException"/> — the caller decides the
+    /// fallback (DestinationService serves a stale cache entry when it has one) and
+    /// must be able to do so without knowing this adapter speaks HTTP and JSON.
     ///
-    /// This has to be explicit rather than relying on HttpClientFactory's built-in
+    /// The log has to be explicit rather than relying on HttpClientFactory's built-in
     /// request logging, because <c>AddInfrastructure</c> calls RemoveAllLoggers()
     /// on this client: Geoapify takes its apiKey as a query-string parameter, and
     /// the default handlers log the full request URI. Without this method a
     /// Geoapify outage is completely invisible.
     /// </summary>
-    private void LogTransientFailure(Exception ex, string operation) =>
+    private ExternalServiceUnavailableException Translate(Exception ex, string operation)
+    {
         _logger.LogWarning(ex, "Geoapify {Operation} failed.", operation);
+        return new ExternalServiceUnavailableException($"Geoapify {operation} failed.", ex);
+    }
 
     /// <summary>
     /// Connection failures, HttpClient timeouts (surfaced as TaskCanceledException,
@@ -100,8 +96,7 @@ public class GeoapifyClient : IDestinationProvider
         }
         catch (Exception ex) when (IsTransientFailure(ex) && !cancellationToken.IsCancellationRequested)
         {
-            LogTransientFailure(ex, "location search");
-            throw;
+            throw Translate(ex, "location search");
         }
 
         if (payload?.Features is null)
@@ -140,8 +135,7 @@ public class GeoapifyClient : IDestinationProvider
         }
         catch (Exception ex) when (IsTransientFailure(ex) && !cancellationToken.IsCancellationRequested)
         {
-            LogTransientFailure(ex, "attractions lookup");
-            throw;
+            throw Translate(ex, "attractions lookup");
         }
 
         if (payload?.Features is null)
@@ -184,8 +178,7 @@ public class GeoapifyClient : IDestinationProvider
         }
         catch (Exception ex) when (IsTransientFailure(ex) && !cancellationToken.IsCancellationRequested)
         {
-            LogTransientFailure(ex, "place details");
-            throw;
+            throw Translate(ex, "place details");
         }
 
         var place = payload?.Features?.FirstOrDefault()?.Properties;

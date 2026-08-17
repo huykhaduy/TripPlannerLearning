@@ -2,6 +2,10 @@
 
 Tài liệu này tập trung vào **cách làm và lý do quyết định**, không nhắc lại requirement.
 
+> **Chưa quen ASP.NET Core / EF Core?** Đọc [Phụ lục A](#phụ-lục-a--nền-tảng-aspnet-core--ef-core)
+> trước. Nó giải thích các khái niệm nền (DI, middleware, DbContext, change tracker…) bằng chính
+> code của dự án này, để phần thân đọc lên không còn lạ từ vựng.
+
 ---
 
 ## Mục lục
@@ -14,12 +18,13 @@ Tài liệu này tập trung vào **cách làm và lý do quyết định**, kh�
 6. [Validation](#6-validation)
 7. [Cache hoạt động như thế nào](#7-cache-hoạt-động-như-thế-nào)
 8. [Logging](#8-logging)
-9. [Concurrency](#9-concurrency)
+9. [Concurrency & chi tiết EF Core](#9-concurrency--chi-tiết-ef-core)
 10. [Frontend gọi API như thế nào](#10-frontend-gọi-api-như-thế-nào)
 11. [Testing](#11-testing)
 12. [Configuration & secrets](#12-configuration--secrets)
 13. [Q&A — câu reviewer có thể hỏi](#13-qa--câu-reviewer-có-thể-hỏi)
 14. [Hạn chế đã biết](#14-hạn-chế-đã-biết)
+- [Phụ lục A — Nền tảng ASP.NET Core & EF Core](#phụ-lục-a--nền-tảng-aspnet-core--ef-core)
 
 ---
 
@@ -31,14 +36,18 @@ Tài liệu này tập trung vào **cách làm và lý do quyết định**, kh�
 | ORM / DB | EF Core + PostgreSQL (Npgsql) |
 | Auth | JWT Bearer, BCrypt hash mật khẩu |
 | Validation | FluentValidation |
-| Cache | `IDistributedCache` — in-process (mặc định) hoặc Redis |
+| Cache | `IStaleTolerantCache` (port) trên `IDistributedCache` — in-process (mặc định) hoặc Redis |
 | API ngoài | Geoapify (địa điểm/POI), Serper (tìm ảnh), SMTP (email xác thực) |
 | Frontend | React + TypeScript + Vite + React Router + Axios |
 | Test | xUnit + Moq + EF InMemory + `WebApplicationFactory`; Vitest + React Testing Library |
 
-**Quy mô test:** 347 case backend (279 `Application.Tests` + 68 `WebApi.Tests`), 263 case
-frontend (28 file) — tất cả đều pass. Chạy `dotnet test` và `npm test` để xác nhận lại trước
-khi trình bày.
+**Quy mô test:** 371 case backend (302 `TripPlanner.UnitTests` + 69 `TripPlanner.WebApi.Tests`),
+263 case frontend (28 file) — tất cả đều pass. Chạy `dotnet test` và `npm test` để xác nhận lại
+trước khi trình bày.
+
+`TripPlanner.UnitTests` cố ý **không** soi gương 1-1 với `src/`: một project phủ cả Domain,
+Application **và** Infrastructure, vì cả ba chạy in-process và dùng chung fixture. Chia project
+theo *thứ cần để chạy* (có host hay không), không theo tên tầng.
 
 **API endpoints:**
 
@@ -93,13 +102,33 @@ không có test nào khác trong suite phát hiện được.
 | Project | ProjectReference | Package chính |
 |---|---|---|
 | `TripPlanner.Domain` | *(không có)* | *(không có)* |
-| `TripPlanner.Application` | Domain | FluentValidation, các gói `*.Abstractions` |
+| `TripPlanner.Application` | Domain | FluentValidation, `DependencyInjection.Abstractions` |
 | `TripPlanner.Infrastructure` | Application | EF Core, Npgsql, BCrypt, StackExchange.Redis, JWT |
 | `TripPlanner.WebApi` | Application + Infrastructure | ASP.NET Core, Swagger, DotNetEnv |
 
 Điểm mạnh nhất: **Domain không có một `PackageReference` nào**. Nếu vô tình viết
 `using Microsoft.EntityFrameworkCore;` trong `AuthService.cs`, project **không build được** —
 kiến trúc được compiler ép buộc chứ không phụ thuộc kỷ luật lập trình viên.
+
+Application chỉ còn **hai** package. `Caching.Abstractions` và `Logging.Abstractions` từng có mặt,
+và cả hai biến mất khi cơ chế cache được đẩy xuống Infrastructure (mục 7) — một cách kiểm tra
+"tầng này có bị rò công nghệ không" mà không cần đọc code: cứ nhìn file `.csproj`.
+
+### Domain không chỉ chứa dữ liệu — nó giữ quy tắc của chính nó
+
+`Trip` là aggregate root của cả ba entity `Trip` / `ItineraryDay` / `ItineraryItem`. Mọi quy tắc về
+*ngày nào tồn tại*, *item nằm bucket nào*, *thứ tự ra sao* đều nằm trên `Trip`:
+
+| Method | Giữ bất biến gì |
+|---|---|
+| `SetDates` | start ≤ end, **và** Days luôn khớp khoảng ngày |
+| `MoveItem` | SortOrder liền mạch 0..n ở cả hai bucket bị ảnh hưởng |
+| `NextSortOrderIn` | item mới luôn rơi xuống cuối bucket |
+| `HasDestinationIn` | một địa điểm xuất hiện tối đa một lần mỗi bucket |
+
+`StartDate`/`EndDate` để `private set`, nên **không có đường nào** đổi ngày mà lách được
+validation. Toàn bộ các method này thuần tuý (không I/O), nên `TripTests` kiểm chúng không cần
+mock lẫn DbContext.
 
 ### Dependency Inversion — Application định nghĩa, Infrastructure thực thi
 
@@ -112,6 +141,7 @@ bên gọi database. Được như vậy vì Application chỉ khai báo **cái 
 | `IPasswordHasher` | `BCryptPasswordHasher` |
 | `IJwtTokenGenerator` | `JwtTokenGenerator` |
 | `IDestinationProvider` | `GeoapifyClient` |
+| `IStaleTolerantCache` | `DistributedStaleTolerantCache` |
 | `IImageSearchProvider` | `SerperImageClient` |
 | `IEmailSender` | `SmtpEmailSender` |
 | `IAppUrlProvider` | `AppUrlProvider` |
@@ -162,7 +192,20 @@ public interface IUserRepository
 
 Lý do: mỗi request trong hệ này thao tác đúng **một aggregate**, nên không có kịch bản nào cần
 gom nhiều thay đổi vào một transaction do tầng trên điều khiển. Thêm Unit of Work sẽ là một lớp
-trừu tượng không ai dùng tới.
+trừu tượng không ai dùng tới — nhất là khi `DbContext` **bản thân nó đã là** một Unit of Work
+(gom thay đổi, rồi `SaveChangesAsync` đẩy xuống trong một transaction). Bọc thêm một lớp nữa lên
+trên là bọc UoW bằng UoW.
+
+**Đánh đổi phải nói thẳng:** `UpdateAsync(trip)` **không dùng** tham số của nó. Change tracker
+của EF đã giữ sẵn entity từ lúc query, nên hàm chỉ cần flush; tham số ở đó để chỗ gọi đọc thành
+"lưu trip này" thay vì một `SaveChanges()` trơ trọi. Hệ quả là hai điều kiện ẩn, đã được ghi rõ
+trong doc comment của cả interface lẫn implementation:
+
+1. Chỉ đúng với entity nạp bằng query **có tracking** (`GetForUpdateAsync`). Đưa vào một trip lấy
+   từ `GetDetailsAsync` (`AsNoTracking`) thì **không có gì được lưu — và cũng không có lỗi nào**.
+2. Nó flush **mọi thứ** DbContext đang track, không riêng trip này (mọi repository dùng chung một
+   context scoped). Đó chính là lý do `TripService.AddDestinationAsync` phải insert `Destination`
+   **trước** khi chạm vào graph của trip — xem ghi chú ORDER MATTERS ở đó.
 
 ---
 
@@ -261,35 +304,43 @@ Duyệt/tìm kiếm không làm phình DB.
 
 ### 3.3. Đổi ngày trip → sinh lại itinerary days
 
-Đây là thuật toán khó nhất trong project (`TripService.RegenerateDays`):
+Đây là thuật toán khó nhất trong project, và nó nằm **trong Domain** (`Trip.SetDates` →
+`Trip.RegenerateDays`), không phải trong service:
 
 ```
 PUT /api/trips/{tripId}  { name, startDate, endDate }
    ▼
 1. validator (tên bắt buộc)
-2. Trip.SetDates(start, end)  ← quy tắc DOMAIN: start ≤ end, sai thì DomainException → 400
-3. RegenerateDays(trip):
-     • ngày CÒN nằm trong range   → GIỮ NGUYÊN, giữ luôn các item đã xếp
-     • ngày RƠI RA ngoài range    → xoá; item của nó QUAY VỀ Saved Places (không mất)
-     • ngày MỚI trong range       → tạo mới
-     • cuối cùng: đánh số lại theo thứ tự thời gian
-4. UpdateAsync (lưu 1 lần)
+2. Trip.SetDates(start, end)  ← MỘT lời gọi, làm hai việc không tách rời:
+     a. quy tắc DOMAIN: start ≤ end, sai thì DomainException → 400 (ném TRƯỚC khi sửa gì)
+     b. sinh lại days cho range mới:
+        • ngày CÒN nằm trong range   → GIỮ NGUYÊN, giữ luôn các item đã xếp
+        • ngày RƠI RA ngoài range    → xoá; item của nó QUAY VỀ Saved Places (không mất)
+        • ngày MỚI trong range       → tạo mới
+        • cuối cùng: đánh số lại theo thứ tự thời gian
+3. UpdateAsync (lưu 1 lần)
 ```
 
 Không xoá sạch rồi tạo lại — làm vậy sẽ mất hết lịch trình user đã xếp chỉ vì lùi ngày về 1 hôm.
 Code còn **mirror cascade `SetNull` của DB vào in-memory**, để DTO trả về đã hiển thị đúng
 "item quay lại Saved Places" ngay, không cần load lại.
 
+**Vì sao gộp vào `SetDates` chứ không để service gọi hai bước:** nếu tách, mọi caller đều phải nhớ
+gọi bước 2 — quên một lần là trip có ngày không khớp với khoảng ngày của nó. Gộp lại thì bất biến
+"Days luôn khớp date range" trở thành **không thể phá vỡ từ bên ngoài**. `StartDate`/`EndDate` cũng
+để `private set` vì lý do đó: không có đường nào đổi ngày mà lách được validation.
+
 ### 3.4. Kéo thả sắp xếp lịch trình
 
 ```
 PUT /api/trips/{tripId}/destinations/{itemId}  { itineraryDayId, sortOrder }
-   ▼ TripService.UpdateItineraryItemAsync
+   ▼ TripService.UpdateItineraryItemAsync   ← điều phối
        - itineraryDayId = null nghĩa là "Saved Places"
-       - EnsureNotDuplicate(..., excludeItemId: itemId)
+       - Trip.HasDestinationIn(..., excludeItemId: itemId)   ← DOMAIN trả lời "có trùng không"
          ← item được miễn tự-đối-chiếu, nên kéo thả trong cùng 1 ngày vẫn hợp lệ
-       - MoveItem: chèn vào vị trí, sortOrder được CLAMP → gửi 99 nghĩa là "cuối cùng"
-       - Resequence CẢ HAI bucket về 0..n → giá trị luôn liền mạch, không có khoảng trống
+         ← service mới là chỗ ném ConflictException → 409 (409 là từ vựng của tầng HTTP)
+       - Trip.MoveItem: chèn vào vị trí, sortOrder được CLAMP → gửi 99 nghĩa là "cuối cùng"
+         ← Resequence CẢ HAI bucket về 0..n → giá trị luôn liền mạch, không có khoảng trống
        - MỘT lần save → hai bucket đổi nguyên tử
 ```
 
@@ -456,18 +507,41 @@ không cache (dữ liệu riêng tư, thay đổi liên tục).
 
 **Thời gian lưu giữ (retention): 7 ngày** — dài hơn TTL rất nhiều. Đây là mấu chốt của thiết kế.
 
-### Thiết kế cốt lõi: "stale-better-than-down"
+### Tách CHÍNH SÁCH khỏi CƠ CHẾ
 
-Không dùng TTL của cache để evict. Thay vào đó bọc giá trị trong một envelope tự quản lý:
+Đây là điểm đáng nói nhất khi thuyết trình. Hai thứ trước đây nằm chung trong
+`DestinationService` giờ ở hai tầng khác nhau, vì chúng thay đổi vì những lý do khác nhau:
+
+| | Là gì | Ở đâu |
+|---|---|---|
+| **Chính sách** | TTL bao lâu, khi nào chấp nhận dữ liệu cũ | Application — `DestinationService` |
+| **Cơ chế** | JSON, `byte[]`, expiry options, retention 7 ngày | Infrastructure — `DistributedStaleTolerantCache` |
+
+Ranh giới là port `IStaleTolerantCache`: *"cất giá trị kèm thời điểm lấy, và trả lại bất kể nó cũ
+đến đâu — cũ bao nhiêu là chấp nhận được thì người gọi tự quyết"*.
 
 ```csharp
-private sealed record CacheEnvelope<T>(T Value, DateTimeOffset FetchedAt);
+public interface IStaleTolerantCache
+{
+    Task<CacheEnvelope<T>?> TryGetAsync<T>(string key, CancellationToken ct = default);
+    Task SetAsync<T>(string key, CacheEnvelope<T> envelope, CancellationToken ct = default);
+}
+
+public sealed record CacheEnvelope<T>(T Value, DateTimeOffset FetchedAt);
 ```
+
+Kết quả cụ thể, kiểm chứng được: **Application không còn tham chiếu `System.Text.Json` lẫn
+`Microsoft.Extensions.Caching.Abstractions`** — cả hai package đã bị gỡ khỏi
+`TripPlanner.Application.csproj`.
+
+### Thiết kế cốt lõi: "stale-better-than-down"
+
+Không dùng TTL của cache backend để evict. Toàn bộ chính sách nằm gọn trong một hàm ở Application:
 
 ```csharp
 private async Task<T> GetCachedAsync<T>(string key, TimeSpan ttl, Func<Task<T>> fetchAsync, CancellationToken ct)
 {
-    var stale = await TryGetCachedEnvelopeAsync<T>(key, ct);
+    var stale = await _cache.TryGetAsync<T>(key, ct);
 
     // 1. HIT còn tươi → trả luôn, không gọi provider
     if (stale is not null && _clock.GetUtcNow() - stale.FetchedAt < ttl)
@@ -477,16 +551,21 @@ private async Task<T> GetCachedAsync<T>(string key, TimeSpan ttl, Func<Task<T>> 
     {
         // 2. MISS hoặc hết hạn → gọi provider, cache lại
         var value = await fetchAsync();
-        await SetCachedEnvelopeAsync(key, new CacheEnvelope<T>(value, _clock.GetUtcNow()), ct);
+        await _cache.SetAsync(key, new CacheEnvelope<T>(value, _clock.GetUtcNow()), ct);
         return value;
     }
-    catch (Exception ex) when (IsTransientExternalFailure(ex) && !ct.IsCancellationRequested && stale is not null)
+    catch (ExternalServiceUnavailableException) when (stale is not null)
     {
         // 3. Provider CHẾT nhưng còn entry cũ → trả dữ liệu cũ còn hơn trả lỗi
         return stale.Value;
     }
 }
 ```
+
+Chú ý mệnh đề `catch`: chỉ bắt **đúng một** type do adapter dịch ra. Trước đây chỗ này bắt theo
+một predicate ba-loại-exception (`HttpRequestException`/`TaskCanceledException`/`JsonException`)
+bị copy sang cả `AuthService` và `TripService` — nghĩa là Application phải biết provider nói
+giao thức gì.
 
 **Vì sao tự kiểm tra freshness thay vì để cache tự evict:** nếu để cache evict theo TTL, entry
 hết hạn sẽ **biến mất** — lúc Geoapify sập thì không còn gì để fallback. Giữ entry 7 ngày và tự
@@ -496,10 +575,13 @@ so `FetchedAt` với TTL cho phép phân biệt ba trạng thái: *tươi*, *cũ
 `_clock` là `TimeProvider` được inject (đăng ký `TimeProvider.System` trong `AddApplication()`),
 nên test có thể tua thời gian để kiểm tra logic hết hạn mà không cần `Thread.Sleep`.
 
-### Ba tầng chống lỗi
+### Bốn tầng chống lỗi
 
 ```
-DestinationService                  ← tầng 3: provider chết → trả stale
+DestinationService                  ← tầng 4: provider chết → trả stale
+   │ IStaleTolerantCache (port của Application)
+   ▼
+DistributedStaleTolerantCache       ← tầng 3: entry lệch shape → coi như miss
    │ IDistributedCache (abstraction)
    ▼
 ResilientDistributedCache           ← tầng 2: Redis chết → coi như cache miss
@@ -507,6 +589,10 @@ ResilientDistributedCache           ← tầng 2: Redis chết → coi như cach
    ▼
 MemoryDistributedCache / RedisCache ← tầng 1: backend chọn qua config
 ```
+
+Thứ tự này có chủ đích: tầng 3 nằm **trên** tầng 2, nên khi request tới được chỗ deserialize thì
+lỗi kết nối backend đã bị biến thành "miss" rồi. Nhờ vậy `DistributedStaleTolerantCache` chỉ phải
+lo đúng một loại lỗi: payload đọc không ra.
 
 **`ResilientDistributedCache`** là decorator, bọc bất kỳ backend nào được cấu hình:
 
@@ -543,7 +629,7 @@ Vì entry sống 7 ngày, việc đổi shape của một DTO sẽ khiến mọi
 ```csharp
 catch (JsonException ex)
 {
-    _logger.LogWarning(ex, "Discarding a cache entry for {Key} that no longer matches {Type}.", key, typeof(T).Name);
+    logger.LogWarning(ex, "Discarding a cache entry that no longer matches {Type}.", typeof(T).Name);
     return null;   // coi như miss
 }
 ```
@@ -551,6 +637,16 @@ catch (JsonException ex)
 Coi như miss (để request không bị 500), nhưng **có log** — nếu không thì hiện tượng này trông
 hệt như "cache tự dưng ngừng hoạt động". Lưu ý: **không** áp dụng cách xử lý này lúc *ghi* —
 serialize lỗi khi ghi là bug thật, phải để nó nổi lên.
+
+Message log **không kèm cache key**, đúng với chính sách ở mục 8: key nhúng từ khoá người dùng
+nhập. Trước khi tách adapter, chỗ này log cả key — mâu thuẫn với chính `ResilientDistributedCache`
+ngay bên cạnh, vốn ghi rõ là không log key.
+
+Nhánh này trước đây **không có test nào**: `DestinationService` chỉ từng được truyền
+`NullLogger`, nên cái Warning — vốn là toàn bộ hành vi nhìn thấy được của nó — chưa bao giờ được
+assert. Sau khi chuyển sang Infrastructure, `DistributedStaleTolerantCacheTests` phủ 8 case, gồm
+cả retention 7 ngày (thứ khiến stale-better-than-down khả thi) và việc lỗi serialize khi ghi
+**không** bị nuốt.
 
 ### Vài chi tiết nhỏ đáng nói
 
@@ -582,7 +678,7 @@ Toàn bộ log trong solution (đây là danh sách đầy đủ):
 | `SmtpEmailSender` | Debug | `"SMTP is not configured; skipping email {Subject}."` | bỏ qua (dev chưa cấu hình SMTP là bình thường) |
 | `ResilientDistributedCache` | Warning | `"Distributed cache unavailable during {Operation}..."` | **nuốt** — degrade là đúng hợp đồng của nó |
 | `JwtTokenGenerator` (×3) | Warning | token xác thực không đọc được / sai chữ ký / sai purpose claim | trả về không hợp lệ |
-| `DestinationService` | Warning | `"Discarding a cache entry for {Key}..."` | coi như cache miss |
+| `DistributedStaleTolerantCache` | Warning | `"Discarding a cache entry that no longer matches {Type}."` — **không kèm key** | coi như cache miss |
 
 ### Vì sao adapter phải ném lại chứ không nuốt
 
@@ -597,11 +693,15 @@ Vì caller cần **phân biệt** các trường hợp mà adapter không có đ
 `ResilientDistributedCache` là **ngoại lệ duy nhất được phép nuốt**, vì degrade thành cache miss
 chính là *hợp đồng* của nó.
 
-### Chỉ một `ILogger` trong tầng Application
+### Không còn `ILogger` nào trong tầng Application
 
-`DestinationService` là class duy nhất ở Application có logger, cho đúng **một** loại lỗi phát
-sinh *tại tầng này* thay vì từ adapter: entry cache không còn khớp shape DTO — đó là lỗi với hợp
-đồng JSON của chính dự án, không có adapter nào để đẩy vào.
+Trước đây `DestinationService` là class duy nhất ở Application có logger, cho đúng một loại lỗi
+phát sinh *tại tầng này*: entry cache không còn khớp shape DTO. Sau khi tách cơ chế cache, lỗi đó
+phát sinh trong adapter (`DistributedStaleTolerantCache`) và logger đi theo nó.
+
+Kết quả: **Application không còn logger nào cả**, và `Microsoft.Extensions.Logging.Abstractions`
+đã bị gỡ khỏi `TripPlanner.Application.csproj`. Đây là một quy tắc dễ kiểm: nếu bạn thấy cần
+`ILogger` trong Application, gần như chắc chắn lỗi đó thuộc về một adapter.
 
 ### Structured logging
 
@@ -616,7 +716,7 @@ thuộc tính query được, không phải text phẳng.
 
 ---
 
-## 9. Concurrency
+## 9. Concurrency & chi tiết EF Core
 
 ### Chiến lược: unique index ở DB + catch/retry, không dùng lock ở tầng app
 
@@ -669,6 +769,203 @@ sẵn key sẽ bị phân loại là row **đã tồn tại** → phát UPDATE t
 
 Migration `SetIdValueGeneratedNever` **cố ý rỗng** — nó chỉ mang thay đổi metadata vào
 `ApplicationDbContextModelSnapshot`, thứ mà các migration sau diff với. Không được xoá.
+
+### `AsSplitQuery` — cartesian explosion và cách EF Core sinh SQL
+
+Đây là phần đáng đào sâu nhất về EF Core trong dự án, vì nó là một cái bẫy mà tên gọi không hề
+gợi ra, và nhìn code thì không thấy gì bất thường.
+
+#### Gốc rễ: SQL chỉ biết trả về bảng phẳng
+
+`Trip` có **hai** collection — `Days` và `Items`. Query nạp chi tiết trip cần cả hai:
+
+```csharp
+.Include(t => t.Days).ThenInclude(d => d.Items).ThenInclude(i => i.Destination)
+.Include(t => t.Items).ThenInclude(i => i.Destination)
+```
+
+Mặc định EF gom tất cả vào **một câu SQL**. Nhưng SQL chỉ trả về được một bảng phẳng, không trả về
+được cấu trúc lồng nhau. Nên nó buộc phải `LEFT JOIN` từng nhánh vào dòng trip:
+
+```sql
+FROM Trips t
+LEFT JOIN (ItineraryDays ⋈ ItineraryItems ⋈ Destinations) AS s0 ON t.Id = s0.TripId
+LEFT JOIN (ItineraryItems ⋈ Destinations)                 AS s1 ON t.Id = s1.TripId
+```
+
+`s0` và `s1` **không có điều kiện nào ràng buộc lẫn nhau** — cả hai chỉ nối vào `t`. Database vì
+thế phải ghép **mọi dòng của `s0` với mọi dòng của `s1`**. Đó là tích Descartes, và tên gọi của
+hiện tượng này là *cartesian explosion*.
+
+Thử một trip tí hon để đếm tay: 2 ngày, 3 địa điểm (ngày 1 có A và B, ngày 2 có C).
+
+| | `s1` = A | `s1` = B | `s1` = C |
+|---|---|---|---|
+| `s0` = (ngày 1, A) | ✓ | ✓ | ✓ |
+| `s0` = (ngày 1, B) | ✓ | ✓ | ✓ |
+| `s0` = (ngày 2, C) | ✓ | ✓ | ✓ |
+
+**9 dòng** cho dữ liệu thật chỉ gồm 1 trip + 2 ngày + 3 item. Và con số 9 chưa phải chỗ tốn nhất:
+**mỗi dòng trong 9 dòng đó chở theo toàn bộ cột** của trip, của ngày, của item *và* của
+destination — tức cả `Address`, `Description`, `ImageUrl`, `Website`, `OpeningHours`. Cùng một
+destination được gửi qua dây nhiều lần.
+
+#### Vì sao là bậc hai theo item, không phải `ngày × item`
+
+Trực giác ban đầu hay đoán `days × items`. Đếm kỹ thì không phải:
+
+- `s0` = một dòng cho **mỗi cặp (ngày, item trong ngày đó)**, cộng một dòng cho mỗi **ngày trống**
+  (`LEFT JOIN` giữ lại ngày không có item). Nếu mọi item đều đã xếp lịch thì `s0` ≈ số item.
+- `s1` = **mọi item** của trip.
+
+Nhân lại: `(items + ngày trống) × items` — **số ngày gần như không ảnh hưởng, số item mới là thủ
+phạm**. Bảng đo bên dưới xác nhận: 14 ngày/60 item và 30 ngày/60 item đều ra đúng 3 600 dòng.
+
+#### Hai nhánh `Include` trùng nhau — và vì sao vẫn giữ
+
+Nhìn kỹ sẽ thấy hai nhánh chồng lên nhau. Nguyên nhân nằm ở model: `ItineraryItem` mang **cả hai**
+khoá.
+
+```csharp
+public Guid  TripId         { get; set; }   // luôn có
+public Guid? ItineraryDayId { get; set; }   // null = Saved Places
+```
+
+Nên `day.Items` là một **tập con** của `trip.Items`:
+
+| | Nhánh `Days → Items → Destinations` | Nhánh `Items → Destinations` |
+|---|---|---|
+| Dòng `ItineraryDays` | ✅ chỉ nhánh này có | — |
+| Dòng `ItineraryItems` | chỉ item **đã xếp lịch** | **mọi** item |
+| Dòng `Destinations` | của các item đã xếp | của mọi item |
+
+Thứ duy nhất nhánh đầu đóng góp riêng là **bản thân các dòng `ItineraryDays`** (`Date`,
+`DayNumber`). Phần item và destination trong nó là dữ liệu lấy lại lần hai. EF không tự nhận ra
+điều đó vì ta khai báo hai đường điều hướng riêng biệt, và nó dịch từng đường một — nó không suy
+luận "hai đường này cùng về một bảng, gộp đi".
+
+Vẫn giữ nhánh trùng vì `TripMappings.ToDayDto` đang đọc `day.Items` để dựng DTO cho từng ngày.
+
+**Cái bẫy cần nhớ:** bỏ nhánh trùng đi **không** chữa được cartesian explosion. Còn lại
+`Include(t => t.Days)` và `Include(t => t.Items)` thì vẫn là **hai collection cùng cấp** → vẫn
+tích chéo `days × items`. Bỏ nhánh trùng chỉ giúp bớt dữ liệu lặp, không thay bản chất.
+
+#### `AsSplitQuery` làm gì
+
+Nó bảo EF: đừng nhồi vào một câu, **tách mỗi collection thành một câu riêng**.
+
+```
+Câu 1:  SELECT trip                          →  1 dòng
+Câu 2:  SELECT days + items + destinations   →  3 dòng
+Câu 3:  SELECT items + destinations          →  3 dòng
+```
+
+7 dòng thay vì 9, và không dòng nào lặp lại cột của trip. EF **tự ghép** ba kết quả lại trong bộ
+nhớ thành đúng một object `Trip` với `Days` và `Items` đầy đủ — **code gọi không thấy khác biệt
+gì**. Chính vì không thấy khác biệt nên benchmark phải kiểm cột "same graph": một query nhanh hơn
+mà trả về khác dữ liệu thì vô giá trị.
+
+Bản chất của lựa chọn: **đổi ít round trip lấy nhiều dữ liệu lặp, hoặc ngược lại.**
+
+#### Một hệ quả tinh tế: identity resolution
+
+`AsNoTracking()` **không** làm identity resolution. Nghĩa là cùng một `ItineraryItem` sẽ được tạo
+thành **hai object khác nhau** trong bộ nhớ — một nằm trong `day.Items`, một nằm trong
+`trip.Items`. Ở `GetDetailsAsync` điều này vô hại (mapping đọc mỗi bucket từ một nguồn riêng), chỉ
+tốn bộ nhớ.
+
+Nhưng `GetForUpdateAsync` thì **có tracking**, nên EF gộp về **một** object duy nhất. Đó là điều
+kiện để `Trip.MoveItem` sửa một item trong `trip.Items` mà `day.Items` cũng thấy thay đổi ngay.
+Nếu ai đó thêm `AsNoTracking()` vào `GetForUpdateAsync` cho "nhẹ hơn", các đường ghi sẽ hỏng theo
+kiểu rất khó lần ra.
+
+#### Muốn xuống một câu mà không có tích chéo thì phải làm gì
+
+Chỉ có một cách: bỏ `Include` mà dùng **projection** — `Select` thẳng ra DTO. Khi đó EF chỉ kéo
+đúng các cột cần và tự sinh subquery cho từng collection, không tích chéo.
+
+Đổi lại phải viết tay hình dạng projection, và kết quả **không còn là entity** nên `TripService`
+không gọi được `Trip.MoveItem` lên nó. Vì vậy cách này chỉ hợp cho đường **đọc**
+(`GetDetailsAsync`), không dùng được cho `GetForUpdateAsync`. Dự án giữ `Include` cho cả hai để
+hai đường đọc chung một hình dạng query.
+
+#### Quy tắc nhớ
+
+> Chỉ cần nghĩ tới `AsSplitQuery` khi query có **từ hai `Include` trỏ tới collection trở lên, ở
+> cùng một cấp**.
+
+Một chuỗi `Include` dài nhưng **đơn tuyến** (`Trip → Items → Destination`) thì **không** dính, vì
+mỗi item chỉ có một destination — quan hệ một-một không sinh tích chéo. Nó chỉ nổ khi có hai nhánh
+song song cùng treo trên một gốc.
+
+Trong repo này chỉ có đúng hai query rơi vào trường hợp đó, cả hai đều ở `TripRepository`.
+
+#### Bằng chứng ở tầng SQL
+
+Lấy bằng `ToQueryString()` nên không cần database chạy: câu gốc **5 JOIN / 2 757 ký tự**, sau khi
+split thì câu đầu còn **0 JOIN / 501 ký tự**.
+
+### Số đo thật trên Postgres
+
+Đo bằng `TripPlanner.QueryBenchmarks` (xem dưới), 200 lần chạy mỗi cấu hình, Postgres 17. Cột
+*dòng SQL* khớp đúng công thức `(items + ngày trống) × items`:
+
+| Ngày | Item | Bản ghi thật | Dòng SQL | Một query | Split query | Chênh |
+|---:|---:|---:|---:|---:|---:|---:|
+| 14 | 0 | 14 | 14 | 1.81 ms | 3.47 ms | **chậm hơn 92%** |
+| 14 | 5 | 19 | 70 | 2.32 ms | 3.63 ms | **chậm hơn 57%** |
+| 14 | 10 | 24 | 140 | 2.95 ms | 3.71 ms | **chậm hơn 26%** |
+| 14 | 15 | 29 | 225 | 4.42 ms | 3.01 ms | nhanh hơn 32% |
+| 14 | 20 | 34 | 400 | 4.27 ms | 3.03 ms | nhanh hơn 29% |
+| 14 | 30 | 44 | 900 | 7.81 ms | 3.08 ms | nhanh hơn 61% |
+| 14 | 60 | 74 | 3 600 | 29.21 ms | 3.19 ms | nhanh hơn 89% |
+| 30 | 60 | 90 | 3 600 | 29.44 ms | 3.68 ms | nhanh hơn 88% |
+
+**Đây là một đánh đổi, không phải cải thiện thuần tuý** — và đó là thứ chỉ số đo trên engine thật
+mới lộ ra:
+
+- **Split query gần như phẳng ~3–3.7 ms** bất kể dữ liệu lớn cỡ nào. Nó là 3 round trip, và chi
+  phí đó là hằng số.
+- **Một query thì tăng theo số dòng**, từ 1.8 ms lên 29 ms.
+- **Điểm hoà vốn nằm giữa 10 và 15 item.** Dưới ngưỡng đó, split **chậm hơn** — nhưng chậm một
+  lượng có trần, khoảng 1–1.5 ms tuyệt đối. Trên ngưỡng, phần tiết kiệm tăng theo bình phương:
+  ở 60 item là 26 ms.
+
+Chọn split vì hình dạng rủi ro: mất tối đa ~1.5 ms ở trip nhỏ, đổi lấy việc trip lớn không bao giờ
+rơi xuống 29 ms. Với một app mà mục đích chính là gom thật nhiều địa điểm vào một chuyến đi, phía
+đắt là phía cần chặn.
+
+**Một cảnh báo khi đọc bảng:** đo trên localhost, độ trễ mạng gần như bằng 0. Nếu app và DB nằm
+khác máy, phạt 3 round trip sẽ lớn hơn và điểm hoà vốn dịch lên cao hơn 15 item.
+
+### Đo lại được
+
+`backend/tests/TripPlanner.QueryBenchmarks` giữ nguyên phép đo này để chạy lại bất cứ lúc nào:
+
+```bash
+docker compose up -d && dotnet run --project backend/tests/TripPlanner.QueryBenchmarks
+```
+
+Nó seed dữ liệu **trong một transaction rồi rollback**, nên chạy thẳng vào database dev cũng không
+để lại gì. Với mỗi cấu hình nó in số dòng SQL, thời gian trung bình của cả hai shape trên 200 lần
+chạy, và kiểm tra hai shape trả về **cùng một graph** — một query nhanh hơn nhưng trả về khác dữ
+liệu thì vô giá trị.
+
+Đây không phải test: `dotnet test` không chạy nó (không có test SDK), vì benchmark có thời gian
+chạy dao động, không nên làm suite đỏ. Nó tồn tại chính vì suite **không thể** kiểm chỗ này — EF
+InMemory không phải relational nên bỏ qua `AsSplitQuery` trong im lặng.
+
+```csharp
+await _context.Trips
+    .AsNoTracking()
+    .AsSplitQuery()          // ← mỗi collection một query, không join chéo
+    .Include(t => t.Days).ThenInclude(d => d.Items).ThenInclude(i => i.Destination)
+    .Include(t => t.Items).ThenInclude(i => i.Destination)
+    .FirstOrDefaultAsync(t => t.Id == tripId && t.UserId == userId, ct);
+```
+
+Đánh đổi: split query là nhiều round trip và **không nguyên tử** nếu không bọc transaction. Chấp
+nhận được ở đây vì một trip chỉ do chính chủ ghi, và hai đường ghi vẫn save trong một transaction.
 
 ---
 
@@ -797,7 +1094,8 @@ mảng chưa lọc.
 
 | Tầng | Kiểm gì | Công cụ |
 |---|---|---|
-| `*ServiceTests` | Business logic | EF InMemory (DB mới mỗi test) + Moq |
+| `TripTests` (Domain) | Quy tắc của aggregate: sinh lại days, move/resequence, chống trùng | Không mock, không DbContext |
+| `*ServiceTests` | Điều phối use-case | EF InMemory (DB mới mỗi test) + Moq |
 | `*ValidatorTests` | Lỗi rơi vào **property** nào, **message** chính xác, **biên** hai phía | `TestValidate` |
 | `TripPlanner.WebApi.Tests` | Routing thật, `[Authorize]` thật, middleware map status, binding query string | `WebApplicationFactory<Program>` |
 | Frontend | Hành vi người dùng | Vitest + React Testing Library (jsdom) |
@@ -818,7 +1116,9 @@ không bị vô tình phá:
 |---|---|
 | `Login_WithAPasswordShorterThanRegisterAllows_IsStillValid` | Thêm rule độ dài vào login sẽ khoá tài khoản cũ |
 | `UpdateTrip_WithEndBeforeStart_IsNotTheValidatorsJob` | Đó là quy tắc domain (`Trip.SetDates`), không phải việc của validator |
-| `UpdateItem_WithAPositionPastTheEndOfTheBucket_IsValid` | `TripService` clamp — "99" nghĩa là "cuối cùng" |
+| `UpdateItem_WithAPositionPastTheEndOfTheBucket_IsValid` | `Trip.MoveItem` clamp — "99" nghĩa là "cuối cùng" |
+| `SetDates_WhenItRejects_LeavesTheDaysUntouched` | Ngày sai không được để itinerary bị xây dở |
+| `SetAsync_RetainsEntriesWellPastAnyTtl` | Bỏ retention là giết luôn stale-better-than-down |
 | `DestinationConfigurationTests` | Không ai được thêm lại `HasMaxLength` cho `ProviderId` |
 | `DestinationsEndpointsTests` | Endpoint destinations phải giữ **công khai** |
 | `TestHostConfigurationTests` | Test host không bao giờ ký token bằng key thật của dev |
@@ -887,13 +1187,54 @@ một dòng nhất quán ở đầu mỗi method. Thêm MediatR nghĩa là mỗi
 nhận lại gì. **Điều gì sẽ đảo ngược:** khi cần cross-cutting behavior thứ ba trở lên áp cho mọi
 handler, hoặc khi tách đường đọc sang read model riêng.
 
+### "Sao logic lịch trình nằm trong entity `Trip` mà không phải trong service?"
+
+Vì đó là quy tắc về **tính nhất quán nội tại** của chính `Trip`, không phải quy tắc use-case.
+`RegenerateDays`, `MoveItem`, `Resequence`, `HasDestinationIn` đều thuần tuý: không chạm
+repository, không chạm clock, không chạm provider — chúng chỉ đọc và sửa `trip.Days` / `trip.Items`.
+Đó đúng là định nghĩa của hành vi aggregate.
+
+Trước đây chúng nằm trong `TripService` dưới dạng `private static`, và hệ quả rất cụ thể:
+
+- `Trip.cs` chỉ có 39 dòng với đúng một method — Domain là nơi chứa dữ liệu, không phải nơi chứa
+  quy tắc. Đó là cách một dự án "Clean Architecture" âm thầm thoái hoá thành CRUD phân tầng.
+- Muốn test thuật toán sinh lại ngày phải đi qua `TripServiceTests` với **5 interface được mock**.
+  Giờ `TripTests` test thẳng, không mock, chạy trong ~55 ms.
+
+Ranh giới được giữ có chủ đích: `Trip.HasDestinationIn` chỉ **trả lời** "có trùng không";
+`TripService` mới là chỗ ném `ConflictException` → 409. Nếu đẩy cả việc ném xuống Domain thì nó
+thành `DomainException` → 400, sai ngữ nghĩa. Domain nói *sự thật*, Application quyết định *hậu quả
+HTTP*.
+
 ### "Sao repository không có Unit of Work? Sao mỗi method tự SaveChanges?"
 
-Vì mỗi request trong hệ này thao tác đúng một aggregate. Không có kịch bản nào cần gom nhiều
-thay đổi vào một transaction do tầng trên điều khiển. Ngay cả `UpdateItineraryItemAsync` — thao
-tác chạm hai bucket — vẫn nằm trong một aggregate `Trip`, và code **cố ý gọi một lần
-`UpdateAsync`** để hai bucket đổi nguyên tử. Unit of Work ở đây sẽ là abstraction không ai dùng.
-**Điều gì sẽ đảo ngược:** một use case ghi hai aggregate khác nhau phải cùng thành công/thất bại.
+Hai lý do, lý do thứ nhất quan trọng hơn:
+
+1. **`DbContext` đã là Unit of Work rồi.** Nó gom mọi thay đổi vào change tracker và
+   `SaveChangesAsync` đẩy tất cả xuống trong **một** transaction — đúng định nghĩa của pattern.
+   Thêm `IUnitOfWork` lên trên là bọc một UoW bằng một UoW.
+2. **Không có use case nào cần nó.** Mỗi request thao tác đúng một aggregate. Ngay cả
+   `UpdateItineraryItemAsync` — chạm hai bucket — vẫn nằm trong một aggregate `Trip`, và code
+   **cố ý gọi một lần `UpdateAsync`** để hai bucket đổi nguyên tử. Chỗ duy nhất ghi hai aggregate
+   là `AddDestinationAsync` (`Destination` rồi `Trip`), và ở đó việc tách rời là **có chủ ý**: nếu
+   thêm vào trip hỏng, thứ còn lại là một dòng `Destination` — vốn chỉ là cache dữ liệu Geoapify
+   khoá theo `ProviderId`, lần sau có người thêm đúng địa điểm đó thì dùng lại, đỡ một lần gọi API.
+
+**Điều gì sẽ đảo ngược:** một use case ghi hai aggregate khác nhau mà hỏng một nửa là không chấp
+nhận được. Kể cả lúc đó, một port hẹp kiểu `ITransactionRunner.RunAsync(...)` cũng đủ.
+
+### "Sao `UpdateAsync(trip)` không hề dùng tham số `trip`?"
+
+Vì change tracker của EF đã biết entity đó từ lúc query — truyền vào cũng không thêm thông tin gì.
+Đối chiếu với `AddAsync`: ở đó tham số là **bắt buộc**, vì object vừa `new` chưa được context biết
+tới nên phải `Add()` để đăng ký. Tham số của `UpdateAsync` giữ lại thuần tuý cho chỗ gọi dễ đọc.
+
+Cái giá của nó — và đây mới là phần đáng nói khi bị hỏi: chữ ký hàm **hứa sai hai chiều**. Nó lưu
+*ít* hơn (không gì cả, im lặng, nếu entity được nạp bằng `AsNoTracking`) và *nhiều* hơn (flush cả
+những gì repository khác vừa thêm vào cùng context) so với những gì cái tên gợi ra. Không sửa
+code, nhưng đã viết hẳn hai điều kiện đó vào doc comment của `ITripRepository` / `IUserRepository`
+và cả hai implementation — cảnh báo đặt trên port là quan trọng nhất, vì người viết tầng
+Application chỉ đọc interface chứ không mở Infrastructure ra xem.
 
 ### "Sao không dùng AutoMapper?"
 
@@ -929,6 +1270,21 @@ App vẫn chạy. `ResilientDistributedCache` bắt `RedisConnectionException` /
 Geoapify — chậm hơn, nhưng không lỗi. Đây cũng là nơi **duy nhất** trong solution biết tới
 exception type của Redis.
 
+### "Sao phải thêm `IStaleTolerantCache`? `IDistributedCache` đã là abstraction rồi mà?"
+
+Đúng là abstraction, nhưng là abstraction **về công nghệ**, không phải về nghiệp vụ: nó nói bằng
+`byte[]`, chuỗi key và `DistributedCacheEntryOptions`. Tầng Application không cần biết gì trong
+số đó.
+
+Cái Application thực sự cần diễn đạt chỉ là: *"cất giá trị kèm thời điểm lấy, trả lại bất kể cũ
+đến đâu"*. Phần còn lại — serialize JSON, cửa sổ retention 7 ngày, xử lý entry đọc không ra — là
+chi tiết cài đặt.
+
+Bằng chứng đây không phải thay đổi hình thức: sau khi tách, **hai package reference biến mất khỏi
+`TripPlanner.Application.csproj`** (`System.Text.Json` qua `Caching.Abstractions`, và
+`Logging.Abstractions`). Trước đó `DestinationService` dài 410 dòng mà khoảng 40% là cơ chế cache;
+giờ còn 328 dòng và đọc ra đúng ba use-case.
+
 ### "Nếu Geoapify chết thì sao?"
 
 Ba tình huống: (1) còn entry trong retention 7 ngày → trả dữ liệu cũ; (2) không còn entry → lỗi
@@ -941,10 +1297,12 @@ của mình, vì địa điểm đã lưu trong trip phải xem được kể c�
 Vì cần phân biệt ba trạng thái chứ không phải hai: *tươi*, *cũ nhưng dùng được*, *không có*.
 Để cache evict theo TTL thì entry hết hạn biến mất, và đúng lúc provider sập lại không còn gì để
 fallback. Bọc trong `CacheEnvelope(Value, FetchedAt)` với retention 7 ngày giải quyết chuyện đó.
+Việc *so sánh* TTL là chính sách nên nằm ở Application; việc *lưu* kèm timestamp là cơ chế nên
+nằm sau `IStaleTolerantCache`.
 
 ### "Đổi ngày trip thì lịch trình đã xếp có mất không?"
 
-Không. `RegenerateDays` giữ nguyên ngày còn nằm trong range cùng toàn bộ item của nó. Ngày rơi ra
+Không. `Trip.SetDates` giữ nguyên ngày còn nằm trong range cùng toàn bộ item của nó. Ngày rơi ra
 ngoài mới bị xoá, và item của nó **quay về Saved Places** chứ không bị xoá theo (DB cấu hình
 `SetNull`, và code mirror hành vi đó vào in-memory để DTO trả về đã đúng ngay).
 
@@ -987,7 +1345,8 @@ này cũng không phải sửa `client.ts`.
 ### "Nếu phải scale nhiều instance thì sao?"
 
 JWT là stateless nên auth scale sẵn. Cache đổi sang Redis chỉ bằng một biến `.env` — đó là lý do
-`DestinationService` phụ thuộc `IDistributedCache` chứ không phải `IMemoryCache`. Điểm cần chú ý
+`DestinationService` phụ thuộc `IStaleTolerantCache` (implement bằng `IDistributedCache`) chứ
+không phải `IMemoryCache`. Điểm cần chú ý
 khi scale: `SortOrder` không có unique index (xem phần Hạn chế).
 
 ---
@@ -1011,11 +1370,17 @@ sẵn sàng, chỉ thiếu một helper `getFieldErrors(err)` ở `client.ts` v�
 - `ItineraryItem.SortOrder` **không có** unique index — thứ tự được đảm bảo hoàn toàn in-memory
   bằng resequence dày đặc mỗi request, nên hai thao tác reorder đồng thời trên cùng bucket sẽ race.
 
-### 3. Đoạn dịch unique-violation không có test tự động
+### 3. Vài hành vi chỉ có ở provider SQL nên không có test tự động
 
-EF InMemory không enforce unique index, nên `dotnet test` không thể chạm tới nhánh đó. Phải suy
-luận trực tiếp trên provider SQL. Bù lại bằng cách mock `ConcurrencyException` ở ranh giới
-repository để test phần **caller** (xem `AuthServiceTests`).
+EF InMemory không phải Postgres, nên hai chỗ nằm ngoài tầm với của `dotnet test`:
+
+- **Dịch unique-violation**: InMemory không enforce unique index, nên nhánh đó không bao giờ chạy.
+  Bù lại bằng cách mock `ConcurrencyException` ở ranh giới repository để test phần **caller**
+  (xem `AuthServiceTests`).
+- **`AsSplitQuery`**: là API chỉ dành cho relational provider; InMemory **bỏ qua trong im lặng**.
+  Suite vẫn xanh nhưng không chứng minh được gì về hành vi thật trên Npgsql.
+
+Cả hai đều phải suy luận trực tiếp trên provider SQL, và đều đã được ghi chú ngay tại code.
 
 ### 4. Migration chạy tự động lúc khởi động
 
@@ -1026,4 +1391,389 @@ instance khởi động cùng lúc có thể cùng chạy migration.
 
 Access token hết hạn (mặc định 60 phút) thì user phải đăng nhập lại. Frontend đã xử lý chuyện này
 tử tế (interceptor phát hiện 401 → tự logout → redirect), nhưng chưa có luồng gia hạn im lặng.
+
+---
+
+## Phụ lục A — Nền tảng ASP.NET Core & EF Core
+
+Phần thân report giả định người đọc đã quen hai framework này. Phụ lục này giải thích các khái
+niệm nền — nhưng **bằng chính code của dự án**, không phải bằng ví dụ trừu tượng, để đọc xong là
+mở file ra đối chiếu được ngay.
+
+Đọc theo thứ tự A1 → A6 cho ASP.NET Core, A7 → A12 cho EF Core.
+
+---
+
+## Phần I — ASP.NET Core
+
+### A1. ASP.NET Core thực chất là gì
+
+Không phải một web server cắm sẵn như IIS hay Apache. Nó là một **thư viện** biến chương trình
+console C# bình thường thành ứng dụng web: bạn viết `Main`, gọi vài hàm dựng, và nó khởi động một
+web server tên **Kestrel** lắng nghe HTTP.
+
+Vì vậy `Program.cs` là file quan trọng nhất — nó là điểm bắt đầu thật sự của cả backend.
+
+#### Hai giai đoạn tách bạch, và đây là chỗ dễ nhầm nhất
+
+```csharp
+var builder = WebApplication.CreateBuilder(args);
+
+// ── GIAI ĐOẠN 1: ĐĂNG KÝ ──────────────────────────────
+// Khai báo "ứng dụng này cần những gì". Chưa chạy gì cả.
+builder.Services.AddApplication();
+builder.Services.AddInfrastructure(builder.Configuration);
+builder.Services.AddControllers();
+
+var app = builder.Build();      // ← ranh giới: chốt sổ, không đăng ký thêm được nữa
+
+// ── GIAI ĐOẠN 2: XỬ LÝ REQUEST ────────────────────────
+// Khai báo "mỗi request đi qua những bước nào".
+app.UseMiddleware<ExceptionHandlingMiddleware>();
+app.UseAuthentication();
+app.MapControllers();
+
+app.Run();                      // ← chặn tại đây, bắt đầu nghe HTTP
+```
+
+Mọi thứ **trước** `Build()` chạy đúng **một lần** lúc khởi động. Mọi thứ **sau** nó chạy **mỗi
+request**. Nhầm hai giai đoạn là nguồn gốc của rất nhiều lỗi khó hiểu ở người mới.
+
+Xem [Program.cs](backend/src/TripPlanner.WebApi/Program.cs) — có đánh số từng khối theo đúng thứ
+tự này.
+
+### A2. Dependency Injection — trái tim của ASP.NET Core
+
+**Vấn đề nó giải quyết.** Không có DI, `TripsController` muốn có `TripService` thì phải tự tạo:
+
+```csharp
+// KHÔNG làm thế này
+var service = new TripService(
+    new TripRepository(new ApplicationDbContext(...)),
+    new DestinationRepository(...), ...);
+```
+
+Controller khi đó phải biết cách dựng cả cây phụ thuộc bên dưới nó, và test thì không thay thế
+được thứ gì.
+
+**Cách DI làm.** Bạn chỉ **khai báo cái mình cần** ở constructor:
+
+```csharp
+public class TripsController : ControllerBase
+{
+    private readonly ITripService _tripService;
+
+    public TripsController(ITripService tripService)   // "tôi cần một ITripService"
+    {
+        _tripService = tripService;
+    }
+}
+```
+
+Rồi ở giai đoạn đăng ký, nói cho container biết ai hiện thực cái đó:
+
+```csharp
+services.AddScoped<ITripService, TripService>();
+```
+
+Lúc có request, container tự dựng toàn bộ cây: thấy controller cần `ITripService` → dựng
+`TripService` → thấy nó cần `ITripRepository` → dựng `TripRepository` → thấy nó cần
+`ApplicationDbContext` → dựng nốt. Bạn không viết một dòng `new` nào.
+
+**Vì sao dự án này phụ thuộc vào `interface` chứ không phải class:** vì đó là điều kiện để tầng
+Application không cần biết EF Core tồn tại (mục 2). Container mới là nơi duy nhất biết
+`ITripRepository` thật ra là EF Core.
+
+#### Ba vòng đời — và hệ quả thật trong dự án
+
+| Đăng ký | Nghĩa là | Dùng cho |
+|---|---|---|
+| `AddScoped` | **một instance cho mỗi HTTP request** | `DbContext`, repository, service |
+| `AddSingleton` | một instance cho cả vòng đời ứng dụng | cache, `TimeProvider`, config |
+| `AddTransient` | tạo mới mỗi lần được yêu cầu | object nhẹ, không giữ state |
+
+`Scoped` không phải chi tiết vụn vặt — nó giải thích một hành vi mà bạn sẽ gặp trong code này:
+
+> `ApplicationDbContext` là **Scoped**, nên trong **cùng một request**, `TripRepository` và
+> `DestinationRepository` dùng **chung một** `DbContext`. Đó chính là lý do
+> `TripRepository.UpdateAsync` flush luôn cả `Destination` mà repository kia vừa thêm — và là lý
+> do `TripService.AddDestinationAsync` phải có ghi chú ORDER MATTERS.
+
+Xem lại mục 2 để hiểu vì sao điều đó lại quan trọng.
+
+**Nơi đăng ký trong dự án này:** mỗi tầng một file `DependencyInjection.cs`, `Program.cs` chỉ gọi
+ba dòng `AddApplication()` / `AddInfrastructure()` / `AddWebApi()`.
+
+### A3. Middleware — request đi qua một dây chuyền
+
+Mỗi request không nhảy thẳng vào controller. Nó chui qua một **chuỗi** các lớp xử lý, mỗi lớp
+được quyền làm gì đó **trước** và **sau** phần còn lại của chuỗi:
+
+```
+Request  →  ExceptionHandling  →  CORS  →  Authentication  →  Authorization  →  Controller
+                    ↑                                                              │
+                    └──────────────── Response đi ngược trở ra ────────────────────┘
+```
+
+Một middleware nhìn như thế này — chú ý `await _next(context)` chính là "phần còn lại của dây
+chuyền":
+
+```csharp
+public async Task InvokeAsync(HttpContext context)
+{
+    try
+    {
+        await _next(context);        // gọi các lớp phía sau + controller
+    }
+    catch (Exception ex)             // bắt được mọi lỗi ném ra từ bên trong
+    {
+        await HandleAsync(context, ex);
+    }
+}
+```
+
+Vì nó bọc `_next` trong `try/catch`, `ExceptionHandlingMiddleware` phải nằm **ngoài cùng** thì mới
+bắt được lỗi của mọi thứ phía sau. Đó là lý do thứ tự khai báo trong `Program.cs` quan trọng — mục
+4 giải thích từng vị trí.
+
+**Hệ quả trong dự án:** không controller nào có `try/catch`. Service cứ ném exception mang ngữ
+nghĩa nghiệp vụ (`NotFoundException`, `ConflictException`), middleware dịch sang HTTP status.
+
+### A4. Controller, routing và model binding
+
+```csharp
+[ApiController]
+[Route("api/[controller]")]        // [controller] = "Trips" → /api/trips
+[Authorize]
+public class TripsController : ControllerBase
+{
+    [HttpPost("{tripId:guid}/destinations")]
+    public async Task<ActionResult<TripDestinationDto>> AddDestination(
+        Guid tripId,                          // ① lấy từ URL
+        AddDestinationRequest request,        // ② lấy từ body JSON
+        CancellationToken cancellationToken)  // ③ framework tự truyền
+        => Ok(await _tripService.AddDestinationAsync(tripId, request, cancellationToken));
+}
+```
+
+Ba tham số, ba nguồn khác nhau, và **bạn không viết code lấy chúng** — ASP.NET Core tự làm, gọi là
+**model binding**:
+
+1. `tripId` khớp với `{tripId:guid}` trong route. Phần `:guid` là **ràng buộc**: URL không phải
+   GUID sẽ 404 ngay, không vào tới method.
+2. `request` được deserialize từ JSON body thành C# record. Sai kiểu → 400 tự động.
+3. `CancellationToken` được framework cấp, và nó **huỷ khi client ngắt kết nối**. Đó là lý do gần
+   như mọi method trong dự án đều nhận và chuyền tiếp nó xuống tận EF Core — user đóng tab thì
+   query cũng dừng, không tốn tài nguyên vô ích.
+
+`ActionResult<T>` cho phép trả về **hoặc** dữ liệu **hoặc** một status code: `Ok(x)` → 200,
+`NoContent()` → 204, `CreatedAtAction(...)` → 201 kèm header `Location`.
+
+### A5. Authentication vs Authorization
+
+Hai từ hay bị lẫn, và ASP.NET Core tách chúng thành hai bước riêng:
+
+| | Câu hỏi | Middleware | Kết quả |
+|---|---|---|---|
+| **Authentication** | *Bạn là ai?* | `UseAuthentication()` | **dựng** `HttpContext.User` từ token |
+| **Authorization** | *Bạn có được phép không?* | `UseAuthorization()` | **đọc** `HttpContext.User`, so với `[Authorize]` |
+
+Phải theo đúng thứ tự đó: đảo lại thì bước kiểm quyền chạy khi chưa ai dựng danh tính, và **mọi**
+request đều bị coi là ẩn danh.
+
+#### JWT hoạt động ra sao
+
+JWT là một chuỗi gồm ba phần ngăn bởi dấu chấm: `header.payload.signature`.
+
+- **payload** chứa các **claim** — mẩu thông tin về người dùng, ở đây là user id và email.
+- **signature** được ký bằng `Jwt__Key` mà chỉ server biết.
+
+Điểm mấu chốt: payload **không mã hoá**, ai cũng đọc được (thử dán vào jwt.io). Cái token bảo vệ
+không phải là bí mật nội dung, mà là **tính toàn vẹn** — sửa một ký tự trong payload thì chữ ký
+không khớp nữa và server từ chối. Nên **không bao giờ để dữ liệu nhạy cảm vào JWT**.
+
+Hệ quả lớn: server **không cần lưu session**. Token tự mang đủ thông tin và tự chứng minh mình
+thật. Đây là lý do mục 13 nói "JWT là stateless nên auth scale sẵn".
+
+Trong dự án, code nghiệp vụ không tự đọc claim. Nó gọi `ICurrentUserService.GetRequiredUserId()`,
+và đó là ranh giới giữ cho tầng Application không dính tới `HttpContext`.
+
+### A6. Configuration và `IOptions`
+
+Cấu hình đến từ nhiều nguồn, chồng lên nhau theo thứ tự ưu tiên: biến môi trường (dự án này nạp
+từ `.env`), rồi tham số dòng lệnh, rồi giá trị mà test host tự cấp.
+
+Thay vì đọc chuỗi thô rải rác khắp nơi, ASP.NET Core cho **gom vào một class**:
+
+```csharp
+public class JwtSettings
+{
+    public string Key { get; set; } = "";
+    public string Issuer { get; set; } = "TripPlanner";   // có default
+    public int ExpiryMinutes { get; set; } = 60;
+}
+```
+
+rồi inject qua `IOptions<JwtSettings>`. Lợi ích: **có kiểu dữ liệu** (sai tên key là gãy lúc
+build, không phải lúc chạy), và **kiểm tra được lúc khởi động** — `Jwt__Key` để trống thì host
+**từ chối chạy** thay vì âm thầm ký token bằng chuỗi rỗng.
+
+Một chi tiết tinh tế đáng nhớ: dự án đọc `IOptions<JwtSettings>` **thay vì**
+`builder.Configuration["Jwt:Key"]`. Lý do là **thời điểm** — đọc trực tiếp sẽ lấy giá trị **ngay
+lúc dựng**, chạy trước khi test host kịp cấp giá trị riêng của nó. `IOptions` trì hoãn việc đó
+tới lúc thật sự cần. Có test pin lại điều này (mục 4).
+
+---
+
+## Phần II — EF Core
+
+### A7. ORM, `DbContext` và `DbSet`
+
+**EF Core là một ORM** — Object-Relational Mapper. Nó dịch qua lại giữa hai thế giới: class C# và
+bảng quan hệ.
+
+| C# | Database |
+|---|---|
+| class `Trip` | bảng `Trips` |
+| property `Name` | cột `Name` |
+| một object `Trip` | một dòng |
+| `trip.Days` (collection) | quan hệ khoá ngoại sang bảng `ItineraryDays` |
+
+`ApplicationDbContext` là **phiên làm việc với database**. Nó Scoped, tức mỗi HTTP request có một
+cái riêng, và nó chết khi request kết thúc.
+
+```csharp
+public class ApplicationDbContext : DbContext
+{
+    public DbSet<Trip> Trips => Set<Trip>();      // "bảng Trips, truy vấn được bằng LINQ"
+    public DbSet<User> Users => Set<User>();
+}
+```
+
+Việc bảng nào ánh xạ ra sao (khoá chính, index, độ dài cột, quan hệ) không nằm trong entity mà ở
+các file `*Configuration.cs` riêng — giữ cho `Trip` trong tầng Domain sạch, không dính chút EF Core
+nào. Đó là điều kiện để `TripPlanner.Domain.csproj` **không có một package reference nào** (mục 2).
+
+### A8. LINQ được dịch thành SQL — và cái bẫy `IQueryable`
+
+Bạn viết C#, EF sinh SQL:
+
+```csharp
+_context.Trips.Where(t => t.UserId == userId)
+// → SELECT * FROM "Trips" WHERE "UserId" = @userId
+```
+
+**Điểm quan trọng nhất: query chưa chạy ngay.** `Where` chỉ *dựng thêm* vào cây biểu thức. SQL chỉ
+được gửi đi khi bạn gọi một method **kết thúc**: `ToListAsync()`, `FirstOrDefaultAsync()`,
+`AnyAsync()`, `CountAsync()`.
+
+Đây là cái bẫy kinh điển của người mới:
+
+```csharp
+// ✅ ĐÚNG — lọc chạy trong SQL, chỉ trip của user này đi qua dây
+var mine = await _context.Trips.Where(t => t.UserId == userId).ToListAsync();
+
+// ❌ SAI — ToListAsync() kéo TOÀN BỘ bảng Trips về RAM, rồi mới lọc bằng C#
+var mine = (await _context.Trips.ToListAsync()).Where(t => t.UserId == userId);
+```
+
+Hai dòng cho ra **cùng kết quả**, nên test vẫn xanh, nhưng dòng dưới sẽ sập khi bảng lớn. Quy tắc:
+`IQueryable` = *chưa chạy, còn dịch sang SQL được*; `IEnumerable`/`List` = *đã chạy rồi, từ đây trở
+đi là C# trong RAM*.
+
+Dự án tận dụng điều này ở [TripMappings.cs](backend/src/TripPlanner.Application/Features/Trips/TripMappings.cs):
+mapping được khai báo dưới dạng `Expression`, nên `trip.Items.Count` được **dịch thành
+`COUNT(*)`** thay vì nạp mọi item về rồi mới đếm.
+
+### A9. Change tracker — vì sao không cần lệnh `UPDATE`
+
+Đây là cơ chế đặc trưng nhất của EF Core, và cũng là thứ gây bất ngờ nhất.
+
+Khi bạn query mà **không** có `AsNoTracking()`, `DbContext` **ghi nhớ** object trả về, kèm một
+**bản chụp giá trị gốc**:
+
+```csharp
+var trip = await _context.Trips.FirstOrDefaultAsync(...);   // context nhớ trip này
+trip.Name = "Tên mới";                                       // chỉ sửa object C#, chưa chạm DB
+await _context.SaveChangesAsync();                           // ← so sánh với bản chụp, sinh UPDATE
+```
+
+`SaveChangesAsync` duyệt mọi entity đang được theo dõi, so hiện tại với bản chụp, rồi tự sinh
+`INSERT`/`UPDATE`/`DELETE` cho đúng những gì đã đổi — và gửi **tất cả trong một transaction**.
+
+Ba điều rút ra:
+
+1. **Không có method `Update`** trong EF theo nghĩa thông thường. Bạn sửa object rồi lưu, thế thôi.
+2. **`DbContext` bản thân nó chính là một Unit of Work** — nó gom thay đổi rồi commit một lượt. Đây
+   là lý do dự án không thêm `IUnitOfWork` (mục 13).
+3. **`AsNoTracking()` tắt cơ chế này.** Query nhanh hơn và tốn ít RAM hơn vì không phải giữ bản
+   chụp — nhưng object trả về **không lưu được**.
+
+Điểm 3 chính là cái bẫy đã được ghi hẳn vào doc comment của `ITripRepository`:
+
+```csharp
+var trip = await _trips.GetDetailsAsync(...);   // AsNoTracking!
+trip.Name = "Tên mới";
+await _trips.UpdateAsync(trip);                 // không lưu gì cả — và KHÔNG báo lỗi
+```
+
+Biên dịch sạch, chạy không exception, và không có câu `UPDATE` nào được gửi đi. Đường ghi phải
+dùng `GetForUpdateAsync` (có tracking).
+
+### A10. Navigation property và `Include`
+
+`Trip.Days` và `Trip.Items` là **navigation property** — chúng biểu diễn quan hệ khoá ngoại dưới
+dạng object C#.
+
+Dự án **không bật lazy loading**, nên mặc định các collection này **rỗng** sau khi query. Muốn có
+dữ liệu phải nói rõ — gọi là **eager loading**:
+
+```csharp
+await _context.Trips
+    .Include(t => t.Days)                    // nạp kèm các ngày
+        .ThenInclude(d => d.Items)           // và item của từng ngày
+    .FirstOrDefaultAsync(...);
+```
+
+Tại sao không bật lazy loading cho tiện? Vì nó gây **N+1 query**: vòng lặp qua 30 item, mỗi lần
+chạm `item.Destination` lại lặng lẽ bắn thêm một query — 31 lần đi database mà nhìn code không hề
+thấy. `Include` bắt bạn nói trước mình cần gì, nên chi phí luôn nhìn thấy được.
+
+Nhưng `Include` cũng có cái giá của nó, và đó là **cartesian explosion** — mục 9 mổ xẻ chi tiết
+với số đo thật. Đọc phần đó sau khi nắm A10.
+
+### A11. Migration — quản lý phiên bản của schema
+
+Sửa entity C# thì database phải đổi theo. EF Core làm việc đó bằng **migration**: so model hiện
+tại với snapshot của lần trước, sinh ra file mô tả phần chênh lệch.
+
+```bash
+dotnet ef migrations add ThemCotMoi \
+  --project src/TripPlanner.Infrastructure \
+  --startup-project src/TripPlanner.WebApi
+```
+
+Mỗi migration có `Up()` (áp dụng) và `Down()` (quay lui), commit vào git như code thường. Dự án
+này tự chạy migration lúc khởi động (`ApplyMigrationsAsync` trong `Program.cs`) — tiện cho môi
+trường học tập, nhưng mục 14 có ghi vì sao production nên tách ra.
+
+Một chi tiết dễ hiểu nhầm: migration `SetIdValueGeneratedNever` **rỗng**, không có lệnh SQL nào.
+Nó vẫn phải giữ, vì nó mang thay đổi **metadata** vào file snapshot mà các migration sau sẽ diff
+với. Xoá đi là migration tiếp theo tính chênh lệch sai.
+
+### A12. Những cái bẫy EF Core đã gặp trong chính dự án này
+
+Tất cả đều là chuyện thật, đều đã được ghi lại ở đâu đó trong report — bảng này gom lại để dễ tra:
+
+| Bẫy | Biểu hiện | Vì sao | Mục |
+|---|---|---|---|
+| `AsNoTracking` + lưu | Không có `UPDATE`, **không báo lỗi** | Change tracker không biết object đó | A9, mục 2 |
+| Thiếu `ValueGeneratedNever` | `DbUpdateConcurrencyException` khi thêm mới | EF tưởng Guid do DB sinh → coi row mới là row cũ → phát `UPDATE` | mục 9 |
+| Hai `Include` collection cùng cấp | Query chậm dần theo bình phương | Cartesian explosion | mục 9 |
+| `AsNoTracking` ở đường ghi | Sửa `trip.Items` mà `day.Items` không thấy | Không có identity resolution | mục 9 |
+| EF InMemory trong test | Test xanh nhưng production lỗi | InMemory **không** phải relational: bỏ qua unique index, `HasMaxLength`, `AsSplitQuery` | mục 11, 14 |
+
+Cái cuối đáng nhấn: EF InMemory tiện cho test nhưng **không phải database**. Nó không enforce
+constraint, nên có những mảng code chỉ kiểm chứng được bằng suy luận trực tiếp trên Postgres —
+hoặc bằng `TripPlanner.QueryBenchmarks`.
 

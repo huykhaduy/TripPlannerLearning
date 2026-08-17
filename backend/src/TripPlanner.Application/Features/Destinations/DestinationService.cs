@@ -1,7 +1,5 @@
 using System.Collections.Concurrent;
-using System.Text.Json;
-using Microsoft.Extensions.Caching.Distributed;
-using Microsoft.Extensions.Logging;
+using TripPlanner.Application.Common.Caching;
 using TripPlanner.Application.Common.Exceptions;
 using TripPlanner.Application.Common.Interfaces;
 using TripPlanner.Application.Common.Validation;
@@ -45,11 +43,6 @@ public class DestinationService : IDestinationService
     private static readonly TimeSpan AttractionsTtl = TimeSpan.FromHours(6);
     private static readonly TimeSpan DetailsTtl = TimeSpan.FromHours(24);
 
-    // Entries stay resident well past their TTL so a provider outage can be
-    // answered with stale data (spec §11.2 "stale-better-than-down"); the
-    // retention window bounds memory growth.
-    private static readonly TimeSpan CacheRetention = TimeSpan.FromDays(7);
-
     // Stateless rule declarations with no dependencies — shared instances rather than
     // constructor parameters. See AuthService for the reasoning.
     private static readonly SearchLocationsRequestValidator SearchValidator = new();
@@ -59,104 +52,35 @@ public class DestinationService : IDestinationService
     private readonly IDestinationRepository _destinations;
     private readonly IDestinationProvider _provider;
     private readonly IImageSearchProvider _imageSearch;
-    private readonly IDistributedCache _cache;
+    private readonly IStaleTolerantCache _cache;
     private readonly TimeProvider _clock;
-
-    /// <summary>
-    /// The only logger in the Application layer, and deliberately so. Every other
-    /// failure here originates in an Infrastructure adapter, which logs it at the
-    /// source. The cache-envelope deserialize below is the exception: it fails against
-    /// this project's OWN JSON contract, so there is no adapter to push it into.
-    /// </summary>
-    private readonly ILogger<DestinationService> _logger;
 
     public DestinationService(
         IDestinationRepository destinations,
         IDestinationProvider provider,
         IImageSearchProvider imageSearch,
-        IDistributedCache cache,
-        TimeProvider clock,
-        ILogger<DestinationService> logger)
+        IStaleTolerantCache cache,
+        TimeProvider clock)
     {
         _destinations = destinations;
         _provider = provider;
         _imageSearch = imageSearch;
         _cache = cache;
         _clock = clock;
-        _logger = logger;
-    }
-
-    /// <summary>
-    /// A cached value plus WHEN it was fetched. Freshness is checked against
-    /// the TTL by hand (instead of letting the cache evict) precisely so an
-    /// expired entry is still readable as a stale fallback during an outage.
-    /// </summary>
-    private sealed record CacheEnvelope<T>(T Value, DateTimeOffset FetchedAt);
-
-    /// <summary>
-    /// Reads and JSON-deserializes a <see cref="CacheEnvelope{T}"/> from
-    /// <see cref="IDistributedCache"/>. A cache-backend connectivity failure
-    /// never reaches here — the registered <see cref="IDistributedCache"/> is
-    /// always <c>ResilientDistributedCache</c> (Infrastructure), which
-    /// degrades that to a plain miss (<c>null</c> bytes) before it gets this
-    /// far. A <see cref="JsonException"/> is still treated as a miss here:
-    /// <see cref="CacheRetention"/> is 7 days, long enough for a student to
-    /// reshape a DTO in <c>Features/Destinations/Dtos/</c> between restarts,
-    /// so a stale entry that no longer matches the current shape must not
-    /// 500 the request — same treatment <see cref="IsTransientExternalFailure"/>
-    /// already gives <see cref="JsonException"/> elsewhere in this file.
-    /// Deliberately NOT applied in <see cref="SetCachedEnvelopeAsync{T}"/>: a
-    /// serialize failure on write is a real bug and should surface, not be
-    /// swallowed.
-    /// </summary>
-    private async Task<CacheEnvelope<T>?> TryGetCachedEnvelopeAsync<T>(string key, CancellationToken cancellationToken)
-    {
-        var bytes = await _cache.GetAsync(key, cancellationToken);
-        if (bytes is null)
-        {
-            return null;
-        }
-
-        try
-        {
-            return JsonSerializer.Deserialize<CacheEnvelope<T>>(bytes);
-        }
-        catch (JsonException ex)
-        {
-            // Treated as a miss (see the remarks above), but NOT silently: entries live
-            // for CacheRetention (7 days), so a reshaped DTO invalidates every cached
-            // entry of that type for a week. Without this line that looks exactly like
-            // "the cache mysteriously stopped working".
-            _logger.LogWarning(ex, "Discarding a cache entry for {Key} that no longer matches {Type}.", key, typeof(T).Name);
-            return null;
-        }
-    }
-
-    /// <summary>
-    /// JSON-serializes and writes a <see cref="CacheEnvelope{T}"/> to
-    /// <see cref="IDistributedCache"/>, retained for <see cref="CacheRetention"/>.
-    /// A cache-backend connectivity failure is swallowed by
-    /// <c>ResilientDistributedCache</c> (Infrastructure) before it reaches
-    /// here — the freshly-fetched value the caller already has is still
-    /// returned regardless; this round just isn't cached.
-    /// </summary>
-    private async Task SetCachedEnvelopeAsync<T>(string key, CacheEnvelope<T> envelope, CancellationToken cancellationToken)
-    {
-        var bytes = JsonSerializer.SerializeToUtf8Bytes(envelope);
-        await _cache.SetAsync(
-            key, bytes,
-            new DistributedCacheEntryOptions { AbsoluteExpirationRelativeToNow = CacheRetention },
-            cancellationToken);
     }
 
     /// <summary>
     /// Cache-aside over the provider (NFR1/NFR2): fresh hit → no provider
     /// call; miss/expired → fetch and re-cache; provider down but a stale
     /// entry exists → serve it rather than fail (spec §11.2).
+    ///
+    /// Only an adapter-reported outage falls back. A serialize failure inside
+    /// <see cref="IStaleTolerantCache.SetAsync{T}"/> surfaces as the bug it is, instead
+    /// of being mistaken for a provider failure and answered with stale data.
     /// </summary>
     private async Task<T> GetCachedAsync<T>(string key, TimeSpan ttl, Func<Task<T>> fetchAsync, CancellationToken cancellationToken)
     {
-        var stale = await TryGetCachedEnvelopeAsync<T>(key, cancellationToken);
+        var stale = await _cache.TryGetAsync<T>(key, cancellationToken);
         if (stale is not null && _clock.GetUtcNow() - stale.FetchedAt < ttl)
         {
             return stale.Value;
@@ -165,10 +89,10 @@ public class DestinationService : IDestinationService
         try
         {
             var value = await fetchAsync();
-            await SetCachedEnvelopeAsync(key, new CacheEnvelope<T>(value, _clock.GetUtcNow()), cancellationToken);
+            await _cache.SetAsync(key, new CacheEnvelope<T>(value, _clock.GetUtcNow()), cancellationToken);
             return value;
         }
-        catch (Exception ex) when (IsTransientExternalFailure(ex) && !cancellationToken.IsCancellationRequested && stale is not null)
+        catch (ExternalServiceUnavailableException) when (stale is not null)
         {
             return stale.Value; // stale-better-than-down
         }
@@ -266,26 +190,19 @@ public class DestinationService : IDestinationService
     }
 
     /// <summary>
-    /// Serper (Google Images) first, since it finds a photo for far more places
-    /// than the destination provider's own sparse image data; falls back to
-    /// whatever image the caller already had on hand (the provider's own
-    /// thumbnail), and finally to a stale cached gallery rather than blanking
-    /// out photos that used to be there. In practice Serper rarely returns a
-    /// truly empty result, even for an unrelated query, so a non-null hit is a
-    /// best-effort "top hit", not a confirmed match — the later fallbacks
-    /// mostly only fire when Serper itself is unreachable or times out.
+    /// Serper first (it finds a photo for far more places than the destination
+    /// provider does), then the provider's own thumbnail, then a stale cached
+    /// gallery rather than blanking out photos that used to be there.
     ///
-    /// Shared by the attractions list (which only needs the first photo, via
-    /// <see cref="GetAttractionImageAsync"/>) and the details view's carousel
-    /// (up to <see cref="DetailsPhotoCount"/>) under ONE cache entry per place —
-    /// otherwise the two would independently query and cache different "top
-    /// hits" for the same destination, showing a different photo on the list
-    /// than on its own details page.
+    /// ONE cache entry per place, shared by the attractions list (first photo only,
+    /// via <see cref="GetAttractionImageAsync"/>) and the details carousel (up to
+    /// <see cref="DetailsPhotoCount"/>) — otherwise the two would cache different
+    /// "top hits" and show a different photo on the list than on the details page.
     /// </summary>
     private async Task<IReadOnlyList<string>> GetAttractionImagesAsync(string providerId, string name, string? providerImage, CancellationToken cancellationToken)
     {
         var key = $"imgs:{providerId}";
-        var stale = await TryGetCachedEnvelopeAsync<IReadOnlyList<string>>(key, cancellationToken);
+        var stale = await _cache.TryGetAsync<IReadOnlyList<string>>(key, cancellationToken);
         if (stale is not null && _clock.GetUtcNow() - stale.FetchedAt < ImageTtl)
         {
             return stale.Value;
@@ -298,7 +215,7 @@ public class DestinationService : IDestinationService
             images = await _imageSearch.SearchImagesAsync(name, DetailsPhotoCount, cancellationToken);
             searchSucceeded = true;
         }
-        catch (Exception ex) when (IsTransientExternalFailure(ex) && !cancellationToken.IsCancellationRequested)
+        catch (ExternalServiceUnavailableException)
         {
             // Serper down, timed out, or returned something unparseable — fall
             // through to the next source rather than failing the whole list/page.
@@ -315,7 +232,7 @@ public class DestinationService : IDestinationService
             // which is worth caching so we don't re-pay for the same negative),
             // or the provider-image fallback found something. Safe to stamp as
             // fresh.
-            await SetCachedEnvelopeAsync(key, new CacheEnvelope<IReadOnlyList<string>>(images, _clock.GetUtcNow()), cancellationToken);
+            await _cache.SetAsync(key, new CacheEnvelope<IReadOnlyList<string>>(images, _clock.GetUtcNow()), cancellationToken);
             return images;
         }
 
@@ -339,18 +256,6 @@ public class DestinationService : IDestinationService
     }
 
     /// <summary>
-    /// True for the external-call failure modes we treat as "this source
-    /// didn't come through" rather than "the whole request must fail":
-    /// connection failures, HttpClient timeouts (which surface as
-    /// TaskCanceledException, not HttpRequestException), and a response body
-    /// that doesn't deserialize as expected. Excludes a genuine caller-driven
-    /// cancellation, which should propagate rather than be swallowed as
-    /// "no result".
-    /// </summary>
-    private static bool IsTransientExternalFailure(Exception ex) =>
-        ex is HttpRequestException or TaskCanceledException or JsonException;
-
-    /// <summary>
     /// Cache-aside fetch of one place's details, shared by <see cref="GetDetailsAsync"/>
     /// and the attractions-list image enrichment above — a place looked up during
     /// enrichment is already cached by the time the user clicks into its detail page.
@@ -360,7 +265,7 @@ public class DestinationService : IDestinationService
     private async Task<DestinationDetailsDto?> GetCachedProviderDetailsAsync(string providerId, CancellationToken cancellationToken)
     {
         var key = $"details:{providerId}";
-        var stale = await TryGetCachedEnvelopeAsync<DestinationDetailsDto>(key, cancellationToken);
+        var stale = await _cache.TryGetAsync<DestinationDetailsDto>(key, cancellationToken);
         if (stale is not null && _clock.GetUtcNow() - stale.FetchedAt < DetailsTtl)
         {
             return stale.Value;
@@ -371,14 +276,14 @@ public class DestinationService : IDestinationService
         {
             details = await _provider.GetDestinationDetailsAsync(providerId, cancellationToken);
         }
-        catch (Exception ex) when (IsTransientExternalFailure(ex) && !cancellationToken.IsCancellationRequested)
+        catch (ExternalServiceUnavailableException)
         {
             return stale?.Value; // stale-better-than-down (spec §11.2), else null
         }
 
         if (details is not null)
         {
-            await SetCachedEnvelopeAsync(key, new CacheEnvelope<DestinationDetailsDto>(details, _clock.GetUtcNow()), cancellationToken);
+            await _cache.SetAsync(key, new CacheEnvelope<DestinationDetailsDto>(details, _clock.GetUtcNow()), cancellationToken);
         }
 
         return details;
@@ -397,12 +302,8 @@ public class DestinationService : IDestinationService
         var details = await GetCachedProviderDetailsAsync(providerId, cancellationToken);
         if (details is not null)
         {
-            // Geoapify's own image data is sparse (see EnrichWithImagesAsync) — the
-            // attractions list already papers over that with a Serper lookup, and
-            // F2/US2 wants a full photo gallery here, not just one thumbnail.
-            // GetAttractionImagesAsync already falls back to details.ImageUrl
-            // internally when Serper finds nothing, so images.FirstOrDefault()
-            // is never actually behind details.ImageUrl here.
+            // F2/US2 wants a gallery here, not one thumbnail. Passing details.ImageUrl
+            // in means the helper's own fallback covers the "Serper found nothing" case.
             var images = await GetAttractionImagesAsync(details.ProviderId, details.Name, details.ImageUrl, cancellationToken);
             return details with { ImageUrl = images.FirstOrDefault(), ImageUrls = images };
         }

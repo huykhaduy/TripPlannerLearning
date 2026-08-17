@@ -1,5 +1,3 @@
-using System.Net.Mail;
-using System.Net.Sockets;
 using TripPlanner.Application.Common.Exceptions;
 using TripPlanner.Application.Common.Interfaces;
 using TripPlanner.Application.Common.Validation;
@@ -12,10 +10,11 @@ namespace TripPlanner.Application.Features.Auth;
 
 /// <summary>
 /// ============================================================================
-/// REFERENCE IMPLEMENTATION — read this carefully.
+/// REFERENCE IMPLEMENTATION — read this first.
 /// ============================================================================
-/// This is the one feature slice that is fully built out. It demonstrates the
-/// shape every other use-case in this project should follow:
+/// All three feature slices (Auth, Destinations, Trips) are fully built; this is
+/// the one to study first, because it is the smallest complete example of the
+/// shape every use-case in this project follows:
 ///
 ///   * depend on INTERFACES from the Application layer (IUserRepository,
 ///     IPasswordHasher, IJwtTokenGenerator) — never on EF/Infrastructure types;
@@ -23,23 +22,23 @@ namespace TripPlanner.Application.Features.Auth;
 ///     exceptions (Validation/Conflict/Unauthorized) that the API maps to HTTP;
 ///   * map entities to DTOs so we never leak the password hash to the client.
 ///
-/// Use it as the blueprint for TripService and DestinationService.
+/// TripService and DestinationService add the pieces this slice has no need for:
+/// domain-owned invariants on an aggregate (Trip) and cache-aside over an
+/// external provider, respectively.
 /// </summary>
 public class AuthService : IAuthService
 {
     /// <summary>
-    /// Deliberately vague, and deliberately shared by both rejection paths (the
-    /// in-memory check and the unique-index backstop): a caller must not be able to
-    /// tell "this email is taken" from anything else, or registration becomes an
-    /// account-enumeration oracle (F4/US1).
+    /// Deliberately vague, and shared by both rejection paths (the in-memory check and
+    /// the unique-index backstop): a caller must not be able to tell "this email is
+    /// taken" from anything else, or registration becomes an account-enumeration
+    /// oracle (F4/US1).
     /// </summary>
     private const string RegistrationRejectedMessage = "Unable to register with the provided details.";
 
-    // Validators are stateless rule declarations with no dependencies of their own, so
-    // they are shared instances rather than constructor parameters. Injecting
-    // IValidator<T> would mean an interface with exactly one implementation that
-    // nothing ever substitutes — the tests construct these same classes directly.
-    // FluentValidation validators are safe to reuse concurrently once built.
+    // Stateless, dependency-free rule declarations, so shared instances rather than
+    // constructor parameters: injecting IValidator<T> would mean an interface with one
+    // implementation that nothing ever substitutes. Safe to reuse concurrently.
     private static readonly RegisterRequestValidator RegisterValidator = new();
     private static readonly ResendVerificationRequestValidator ResendValidator = new();
     private static readonly LoginRequestValidator LoginValidator = new();
@@ -160,17 +159,15 @@ public class AuthService : IAuthService
                     + "<p>This link expires in 24 hours.</p>",
                 cancellationToken);
         }
-        catch (Exception ex) when (IsTransientEmailFailure(ex) && !cancellationToken.IsCancellationRequested)
+        catch (ExternalServiceUnavailableException)
         {
-            // F4/US1: the account still exists and resending is a separate,
-            // retryable step, so a mail outage must not fail registration.
-            // Already logged by the IEmailSender implementation — swallowing the
-            // exception here loses no diagnostic information.
+            // F4/US1: a mail outage must not fail registration — the account exists
+            // and "resend verification" is a separate, retryable step. Already logged
+            // by the adapter. Catching the Application-layer type rather than
+            // SmtpException keeps this true for any IEmailSender, and a genuine
+            // cancellation is never reported as this, so it still propagates.
         }
     }
-
-    private static bool IsTransientEmailFailure(Exception ex) =>
-        ex is SmtpException or SocketException; // SmtpFailedRecipientException derives from SmtpException
 
     public async Task<AuthResponse> LoginAsync(LoginRequest request, CancellationToken cancellationToken = default)
     {

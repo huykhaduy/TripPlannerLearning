@@ -1,5 +1,5 @@
-using System.Text.Json;
 using TripPlanner.Application.Common.Exceptions;
+using TripPlanner.Application.Common.Extensions;
 using TripPlanner.Application.Common.Interfaces;
 using TripPlanner.Application.Common.Validation;
 using TripPlanner.Application.Features.Destinations;
@@ -108,58 +108,13 @@ public class TripService : ITripService
             ?? throw new NotFoundException(nameof(Trip), tripId);
 
         trip.Name = request.Name.Trim();
-        // Domain rule: start ≤ end (throws DomainException -> 400).
+        // Domain rules: start ≤ end (throws DomainException -> 400), and the
+        // itinerary days are regenerated for the new range (F3/US2, spec §11.1).
         trip.SetDates(request.StartDate, request.EndDate);
-
-        RegenerateDays(trip);
 
         await _trips.UpdateAsync(trip, cancellationToken);
 
         return trip.ToDetailDto();
-    }
-
-    /// <summary>
-    /// F3/US2 day regeneration (spec §11.1): keep days still inside the date
-    /// range (preserving their scheduled items), delete days that fell out of
-    /// it (their items return to Saved Places), create days for new dates,
-    /// then renumber chronologically.
-    /// </summary>
-    private void RegenerateDays(Trip trip)
-    {
-        var targetDates = new HashSet<DateOnly>();
-        if (trip.StartDate is { } start && trip.EndDate is { } end)
-        {
-            for (var date = start; date <= end; date = date.AddDays(1))
-            {
-                targetDates.Add(date);
-            }
-        }
-
-        foreach (var day in trip.Days.Where(d => !targetDates.Contains(d.Date)).ToList())
-        {
-            // Mirror the DB's SetNull cascade in memory so the DTO we return
-            // already shows these items back in Saved Places.
-            foreach (var item in day.Items)
-            {
-                item.ItineraryDayId = null;
-            }
-
-            // Trip.Days is configured OnDelete(Cascade), so removing the day from
-            // the tracked collection marks the row deleted.
-            trip.Days.Remove(day);
-        }
-
-        var existingDates = trip.Days.Select(d => d.Date).ToHashSet();
-        foreach (var date in targetDates.Where(d => !existingDates.Contains(d)))
-        {
-            trip.Days.Add(new ItineraryDay { TripId = trip.Id, Date = date });
-        }
-
-        var dayNumber = 1;
-        foreach (var day in trip.Days.OrderBy(d => d.Date))
-        {
-            day.DayNumber = dayNumber++;
-        }
     }
 
     public async Task<TripDestinationDto> AddDestinationAsync(Guid tripId, AddDestinationRequest request, CancellationToken cancellationToken = default)
@@ -173,11 +128,15 @@ public class TripService : ITripService
 
         await EnsureDayBelongsToTripAsync(request.ItineraryDayId, trip.Id, cancellationToken);
 
+        // ORDER MATTERS: this must stay ABOVE the trip.Items.Add below. Every
+        // repository shares one scoped DbContext and each write method calls
+        // SaveChanges on all of it, so once the trip graph is mutated in memory,
+        // the destination insert inside here would flush that half-finished change
+        // with it. Adding the destination while the trip is still untouched keeps
+        // the two saves independent.
         var destination = await GetOrCreateDestinationAsync(request.ProviderId, cancellationToken);
 
         EnsureNotDuplicate(trip, destination.Id, request.ItineraryDayId);
-
-        var bucket = trip.Items.Where(i => i.ItineraryDayId == request.ItineraryDayId).ToList();
 
         var item = new ItineraryItem
         {
@@ -185,7 +144,7 @@ public class TripService : ITripService
             DestinationId = destination.Id,
             Destination = destination,
             ItineraryDayId = request.ItineraryDayId,
-            SortOrder = bucket.Count == 0 ? 0 : bucket.Max(i => i.SortOrder) + 1,
+            SortOrder = trip.NextSortOrderIn(request.ItineraryDayId),
         };
         trip.Items.Add(item);
 
@@ -212,7 +171,7 @@ public class TripService : ITripService
         // within the same day passes.
         EnsureNotDuplicate(trip, item.DestinationId, request.ItineraryDayId, excludeItemId: item.Id);
 
-        MoveItem(trip, item, request.ItineraryDayId, request.SortOrder);
+        trip.MoveItem(item, request.ItineraryDayId, request.SortOrder);
 
         // One save: both affected buckets move atomically.
         await SaveWithDuplicateGuardAsync(trip, cancellationToken);
@@ -221,30 +180,26 @@ public class TripService : ITripService
     }
 
     /// <summary>
-    /// Duplicate rule (US4/US6): a destination appears at most once per day, and at
-    /// most once in the Saved Places bucket. Pass <paramref name="excludeItemId"/>
-    /// when moving an existing item so it cannot conflict with itself.
+    /// Turns the aggregate's duplicate rule (US4/US6) into this layer's vocabulary.
+    /// <see cref="Trip.HasDestinationIn"/> owns the rule; a duplicate being an HTTP
+    /// 409 is a request-level concern, which is why the exception is raised here and
+    /// not in the Domain.
     /// </summary>
     private static void EnsureNotDuplicate(Trip trip, Guid destinationId, Guid? itineraryDayId, Guid? excludeItemId = null)
     {
-        if (trip.Items.Any(i => i.Id != excludeItemId
-                && i.DestinationId == destinationId
-                && i.ItineraryDayId == itineraryDayId))
+        if (trip.HasDestinationIn(destinationId, itineraryDayId, excludeItemId))
         {
             throw new ConflictException(DuplicateDestinationMessage);
         }
     }
 
     /// <summary>
-    /// Saves the trip aggregate, translating a unique-index violation on
-    /// (ItineraryDayId, DestinationId) into the same conflict
-    /// <see cref="EnsureNotDuplicate"/> raises — that index is the backstop for a
-    /// concurrent request slipping the same destination in between the check and
-    /// the save.
+    /// Saves, translating a unique-index violation on (ItineraryDayId, DestinationId)
+    /// into the same conflict <see cref="EnsureNotDuplicate"/> raises — the index is
+    /// the backstop for a concurrent request slipping in between check and save.
     ///
-    /// Only for the two paths that add or move an item. <c>UpdateTripAsync</c>
-    /// deliberately saves directly: a date change cannot violate that index, so
-    /// reporting "duplicate destination" there would be a lie.
+    /// Only for the add/move paths. <c>UpdateTripAsync</c> saves directly, because a
+    /// date change cannot violate that index and reporting a duplicate would be a lie.
     /// </summary>
     private async Task SaveWithDuplicateGuardAsync(Trip trip, CancellationToken cancellationToken)
     {
@@ -255,41 +210,6 @@ public class TripService : ITripService
         catch (ConcurrencyException)
         {
             throw new ConflictException(DuplicateDestinationMessage);
-        }
-    }
-
-    /// <summary>
-    /// Spec §11.1 US4-US6: move an item into <paramref name="targetDayId"/> (null =
-    /// Saved Places) at <paramref name="sortOrder"/>, then renumber both affected
-    /// buckets 0..n so values stay dense. The position is clamped, so "99" means last.
-    /// </summary>
-    private static void MoveItem(Trip trip, ItineraryItem item, Guid? targetDayId, int sortOrder)
-    {
-        var sourceDayId = item.ItineraryDayId;
-        item.ItineraryDayId = targetDayId;
-
-        var target = trip.Items
-            .Where(i => i.Id != item.Id && i.ItineraryDayId == targetDayId)
-            .OrderBy(i => i.SortOrder)
-            .ToList();
-        target.Insert(Math.Min(sortOrder, target.Count), item);
-        Resequence(target);
-
-        // The bucket the item left keeps its relative order but closes the gap.
-        if (sourceDayId != targetDayId)
-        {
-            Resequence(trip.Items
-                .Where(i => i.Id != item.Id && i.ItineraryDayId == sourceDayId)
-                .OrderBy(i => i.SortOrder)
-                .ToList());
-        }
-    }
-
-    private static void Resequence(List<ItineraryItem> bucket)
-    {
-        for (var position = 0; position < bucket.Count; position++)
-        {
-            bucket[position].SortOrder = position;
         }
     }
 
@@ -349,14 +269,10 @@ public class TripService : ITripService
     }
 
     /// <summary>
-    /// The provider's own image data is sparse (Geoapify only has wiki_and_media for
-    /// some places), so fall back to a Serper image search by name — the same source
-    /// the attraction cards use, so a saved destination isn't stuck showing the
-    /// placeholder icon everywhere.
-    ///
-    /// Best-effort by design: a Serper outage leaves the destination saved without a
-    /// photo rather than failing the add. Does nothing if the provider already gave
-    /// us an image.
+    /// The provider's image data is sparse, so fall back to a Serper search by name —
+    /// the same source the attraction cards use, so a saved destination isn't stuck
+    /// showing the placeholder icon. Best-effort by design: a Serper outage leaves the
+    /// destination saved without a photo rather than failing the add.
     /// </summary>
     private async Task TryFillMissingImageAsync(Destination destination, CancellationToken cancellationToken)
     {
@@ -369,20 +285,11 @@ public class TripService : ITripService
         {
             destination.ImageUrl = await _imageSearch.SearchImageAsync(destination.Name, cancellationToken);
         }
-        catch (Exception ex) when (IsTransientExternalFailure(ex) && !cancellationToken.IsCancellationRequested)
+        catch (ExternalServiceUnavailableException)
         {
             // Already logged by SerperImageClient; the destination is still saved.
         }
     }
-
-    /// <summary>
-    /// True for the external-call failure modes treated as "no image found"
-    /// rather than "the whole request must fail": connection failures,
-    /// HttpClient timeouts (surfaced as TaskCanceledException, not
-    /// HttpRequestException), and an unparseable response body.
-    /// </summary>
-    private static bool IsTransientExternalFailure(Exception ex) =>
-        ex is HttpRequestException or TaskCanceledException or JsonException;
 
     public async Task RemoveDestinationAsync(Guid tripId, Guid itemId, CancellationToken cancellationToken = default)
     {

@@ -82,6 +82,18 @@ WebApi ──▶ Application ──▶ Domain
 
 - **DI registration**: each layer exposes an extension method (`AddApplication()`, `AddInfrastructure()`, `AddWebApi()`) — `Program.cs` stays small and just calls all three plus framework setup (auth, CORS, Swagger).
 - **Current user**: inject `ICurrentUserService` and call `GetRequiredUserId()`. Never trust a resource ID alone — always filter by `UserId`.
+- **The Trip aggregate owns its own rules.** Everything about which itinerary days exist, which
+  bucket an item sits in, and what order items appear in lives on `Trip`, not in `TripService`:
+  `SetDates` (validates start ≤ end **and** regenerates the days for the new range — one operation,
+  because "Days match the date range" is an invariant), `MoveItem`, `NextSortOrderIn`,
+  `HasDestinationIn`, plus private `RegenerateDays`/`Resequence`. `StartDate`/`EndDate` have
+  `private set` so the only way in is `SetDates`. These are pure and I/O-free, so `TripTests`
+  covers them with no mocks and no DbContext; `TripService` is left doing what an application
+  service should — resolve the user, load, delegate, save. Two boundaries worth keeping: a
+  duplicate is reported by `Trip.HasDestinationIn` (a predicate) but *thrown* by `TripService` as
+  `ConflictException`, because HTTP 409 is this layer's vocabulary and not the Domain's; and
+  `RegenerateDays` drives item detachment off `Trip.Items` rather than `day.Items`, so it holds
+  even when a day's child collection was never loaded.
 - **Exceptions**: throw from the Application layer; `ExceptionHandlingMiddleware` maps them to HTTP status codes:
   | Exception | HTTP |
   |---|---|
@@ -109,11 +121,44 @@ WebApi ──▶ Application ──▶ Domain
   logging). Do not make an adapter swallow to "simplify" a caller: `DestinationService` decides
   whether to cache a result based on whether the search *failed* versus *found nothing*, and
   `AuthService`'s "registration survives a mail outage" guarantee (F4/US1) is asserted by a test
-  at the Application level. `DestinationService` holds the only `ILogger` in Application, for the
-  one failure that originates in this layer rather than an adapter: a cached entry that no longer
-  matches its DTO shape.
+  at the Application level. The Application layer now holds **no `ILogger` at all**: its last one
+  was in `DestinationService`, for a cached entry that no longer matched its DTO shape, and that
+  moved to `DistributedStaleTolerantCache` along with the serialization it was reporting on. If you
+  reach for a logger in Application, that is a signal the failure belongs to an adapter.
+- **Adapters translate their failures into `ExternalServiceUnavailableException`**: the three
+  outbound adapters do not rethrow the *raw* failure — they log it, then throw the Application-owned
+  `ExternalServiceUnavailableException` (`Common/Exceptions/`) with the original as `InnerException`.
+  The Application layer catches only that type, so no service names `SmtpException`,
+  `HttpRequestException`, `TaskCanceledException` or `JsonException`. This is the point: catching
+  `SmtpException` in `AuthService` made the F4/US1 "registration survives a mail outage" guarantee
+  hold only while `IEmailSender` happened to speak SMTP, and it was the reason the same
+  three-type predicate was copy-pasted into `AuthService`, `DestinationService` and `TripService`.
+  Adapters translate **only when their own `CancellationToken` was not the cause**, so a
+  caller-driven cancellation still propagates as `TaskCanceledException` and is never mistaken for
+  an outage — that split is what the "cancelled request is not a provider failure" adapter tests
+  pin. Like `ConcurrencyException`, this type is deliberately **not** mapped by
+  `ExceptionHandlingMiddleware`: a service with a fallback (stale cache entry; save the destination
+  without a photo) catches it, and anywhere else it is a genuine 500. A knock-on rule: Application handles no JSON at
+  all any more — a provider's unparseable body is its adapter's problem, and the cache envelope's
+  own serialization moved to `DistributedStaleTolerantCache`, where a failure on *write* still
+  surfaces as the bug it is instead of being mistaken for a provider outage and answered with
+  stale data. When you add an outbound adapter, translate in it; do not teach Application a new
+  technology's exception type.
 - **Reference slice**: `AuthService.cs` + `AuthController.cs` are the canonical worked example. Study them before implementing other features.
 - **Destination caching**: `Destination` rows are a cache of external-provider data (Geoapify), keyed by a unique index on `ProviderId` (`DestinationConfiguration.cs`). `DestinationService` (search/details) never persists rows — only `TripService.AddDestinationAsync` upserts one, on first add to any trip. Do not reintroduce a "must already exist" lookup there; a fresh `ProviderId` is expected and should upsert, not 404. `ProviderId` is unbounded `text` **by design**: a Geoapify `place_id` is a ~68-char prefix plus the hex-encoded UTF-8 place name (2 id chars per name byte), so real ids run 62–328 chars and the original `varchar(128)` made add-to-trip 500 (Postgres `22001`) for any long or non-Latin name. Never restore a `HasMaxLength` here, and never cap it in the validators (that would reject legitimate places). EF InMemory ignores `HasMaxLength`, so no behavioural test can catch a regression — `DestinationConfigurationTests` pins the absence via model metadata instead.
+- **Cache: policy in Application, mechanism in Infrastructure.** `DestinationService` owns the
+  *policy* — the per-endpoint TTLs and `GetCachedAsync`'s "fresh hit → serve; expired → refetch;
+  provider down but a stale entry exists → serve it anyway" (spec §11.2). Everything technological
+  sits behind `IStaleTolerantCache` (`Common/Interfaces/`), implemented by
+  `DistributedStaleTolerantCache`: JSON, byte arrays, `DistributedCacheEntryOptions`, and the
+  7-day retention window that *makes* stale-better-than-down possible. This is why Application
+  references neither `System.Text.Json` nor `Microsoft.Extensions.Caching.Abstractions` — if you
+  find yourself adding either back, the change probably belongs in the adapter. The shared
+  `CacheEnvelope<T>` lives in `Common/Caching/`, not next to its port, because
+  `Common/Interfaces/` holds only interfaces. Read failures degrade to a miss (an entry outlives a
+  DTO reshape); **write** failures do not, because those are bugs in our own contract. The adapter
+  stacks *above* `ResilientDistributedCache`, so a backend outage is already a plain miss by the
+  time it arrives.
 - **Entities supply their own keys**: `BaseEntity` self-assigns `Id = Guid.NewGuid()`, so all five
   entity configurations declare `builder.Property(x => x.Id).ValueGeneratedNever()`. Without it, EF's
   convention treats a Guid key as store-generated and classifies a *new* child arriving with a key
@@ -131,7 +176,7 @@ WebApi ──▶ Application ──▶ Domain
   over-engineering for this project; `TripService`'s in-memory check is the only guard, and the
   exposure is one duplicate row in a user's own trip. Separately, `ItineraryItem.SortOrder` has no
   unique index — ordering is enforced purely in-memory via dense resequencing per request
-  (`TripService.Resequence`), so two concurrent reorders of the same bucket race.
+  (`Trip.MoveItem`), so two concurrent reorders of the same bucket race.
 
 ### Feature layout (backend)
 
@@ -145,6 +190,37 @@ Application/Features/
 All three are fully implemented (Auth is the canonical worked example to study first, not the only complete one).
 
 Each feature folder holds: the service implementation, an interface, and a `Dtos/` subfolder.
+
+**Where an interface goes** — there are two locations and the rule is the *consumer*, not
+the kind of type:
+
+- `Features/<Feature>/I<Feature>Service.cs` — **inbound** use-case interfaces, beside their
+  one implementation. The controller is the only caller and the pair is read together.
+- `Common/Interfaces/` — **outbound ports** the Application layer defines for someone else to
+  implement (`IUserRepository`, `ITripRepository`, `IDestinationRepository`,
+  `IDestinationProvider`, `IImageSearchProvider`, `IEmailSender`, `IPasswordHasher`,
+  `IJwtTokenGenerator`, `ICurrentUserService`, `IAppUrlProvider`). These are the dependency
+  inversion boundary, so they sit together where that boundary is easy to see and audit.
+
+Corollaries worth stating, because both were violated once: `Common/Interfaces/` holds
+**only** interfaces — a helper class goes in `Common/Extensions/` (that is why
+`CurrentUserServiceExtensions` lives there, not next to `ICurrentUserService`). And these
+interfaces carry **no default implementations**: `ICurrentUserService` had an unused
+`IsAuthenticated => UserId is not null` body, which put logic in a port and was dead besides.
+Behaviour over a port belongs in an extension method, where `GetRequiredUserId` already is.
+
+**A file's name must predict the types in it.** Two allowed shapes, nothing else:
+
+- one top-level type, in a file named after it — the default for anything with behaviour;
+- several small, closely-related types under a **plural name describing the group** —
+  `AuthDtos.cs` / `TripDtos.cs` / `DestinationDtos.cs` (a feature's request/response records;
+  twenty single-record files would be harder to scan, not easier) and
+  `FakeExternalProviders.cs` in the WebApi tests.
+
+What this rules out is a file named after *one* of the types it contains, which is how
+`ItineraryDayConfiguration` and `ItineraryItemConfiguration` came to be hidden inside
+`TripConfiguration.cs` — unfindable by filename — and how `TripSummaryRow` came to live in
+`TripMappings.cs`. All four now have their own files.
 
 ### Frontend structure
 
@@ -160,8 +236,9 @@ src/
 tests/         ← mirrors src/ one-for-one, plus setup.ts and http.ts
 ```
 
-Tests live in `tests/`, **not** beside the code — the same split the backend uses
-(`backend/tests` mirrors `backend/src`), so `src/` holds only shipped code. A test for
+Tests live in `tests/`, **not** beside the code — the same `src/`-vs-`tests/` split the
+backend uses, so `src/` holds only shipped code. (The frontend mirror is one-for-one; the
+backend's is *not* — see the xUnit section below, where one project covers three layers.) A test for
 `src/features/trips/TripsPage.tsx` belongs at `tests/features/trips/TripsPage.test.tsx`;
 keep the mirror exact, because `vite.config.ts` pins `include: ['tests/**/*.test.{ts,tsx}']`
 and a test left under `src/` will simply never run.
@@ -247,6 +324,21 @@ DTO consumed by the feature pages — add new shared shapes here rather than dec
 ad-hoc inline interfaces in components.
 
 ### Testing pattern (xUnit)
+
+There are **two** test projects, split by what they need to run rather than by which layer
+they cover:
+
+- `tests/TripPlanner.UnitTests` — everything that runs in-process with no host. Despite
+  living next to `src/`, it does **not** mirror it one-for-one: it covers Domain
+  (`DomainRules/`), Application (`Auth/`, `Common/`, `Destinations/`, `Trips/`) **and**
+  Infrastructure (`Identity/`, `Infrastructure/`, `Persistence/`) in one project, because
+  they share the same fixtures and need no web host. It was named
+  `TripPlanner.Application.Tests`, which claimed one layer while covering three.
+- `tests/TripPlanner.WebApi.Tests` — `WebApplicationFactory` integration tests (see below).
+
+`TripPlanner.Infrastructure.csproj` grants `InternalsVisibleTo` to `TripPlanner.UnitTests`
+(for `ResilientDistributedCache`), so renaming that project again means updating the csproj
+and `TripPlanner.sln` alongside the namespaces.
 
 Tests use an **in-memory EF Core database** (new `Guid` database name per test) and **Moq** for interfaces. See `AuthServiceTests.cs` as the reference:
 
@@ -335,7 +427,8 @@ flow is driven by minting a token directly via `IJwtTokenGenerator` (resolved fr
   eager `builder.Configuration[...]` read runs before any test host can layer in its own value.
 - Database is PostgreSQL only (no SQLite/InMemory fallback outside tests) — required, no default:
   run `docker compose up -d` and set `ConnectionStrings__Postgres` in `.env` (see `.env.example`).
-- Destination browse-path caching (`DestinationService`) defaults to an in-process `IDistributedCache`.
+- Destination browse-path caching (`DestinationService`) defaults to an in-process backend behind
+  `IStaleTolerantCache`.
   Switch to Redis by setting `Cache__Provider=Redis` in `.env` and running `docker compose up -d`;
   the connection string comes from `ConnectionStrings__Redis` in the same file.
 - Migrations apply automatically on startup via `ApplyMigrationsAsync` in `Program.cs`.
