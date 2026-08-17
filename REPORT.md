@@ -2,6 +2,10 @@
 
 Tài liệu này tập trung vào **cách làm và lý do quyết định**, không nhắc lại requirement.
 
+> **Chưa quen ASP.NET Core / EF Core?** Đọc [Phụ lục A](#phụ-lục-a--nền-tảng-aspnet-core--ef-core)
+> trước. Nó giải thích các khái niệm nền (DI, middleware, DbContext, change tracker…) bằng chính
+> code của dự án này, để phần thân đọc lên không còn lạ từ vựng.
+
 ---
 
 ## Mục lục
@@ -20,6 +24,7 @@ Tài liệu này tập trung vào **cách làm và lý do quyết định**, kh�
 12. [Configuration & secrets](#12-configuration--secrets)
 13. [Q&A — câu reviewer có thể hỏi](#13-qa--câu-reviewer-có-thể-hỏi)
 14. [Hạn chế đã biết](#14-hạn-chế-đã-biết)
+- [Phụ lục A — Nền tảng ASP.NET Core & EF Core](#phụ-lục-a--nền-tảng-aspnet-core--ef-core)
 
 ---
 
@@ -1386,4 +1391,389 @@ instance khởi động cùng lúc có thể cùng chạy migration.
 
 Access token hết hạn (mặc định 60 phút) thì user phải đăng nhập lại. Frontend đã xử lý chuyện này
 tử tế (interceptor phát hiện 401 → tự logout → redirect), nhưng chưa có luồng gia hạn im lặng.
+
+---
+
+## Phụ lục A — Nền tảng ASP.NET Core & EF Core
+
+Phần thân report giả định người đọc đã quen hai framework này. Phụ lục này giải thích các khái
+niệm nền — nhưng **bằng chính code của dự án**, không phải bằng ví dụ trừu tượng, để đọc xong là
+mở file ra đối chiếu được ngay.
+
+Đọc theo thứ tự A1 → A6 cho ASP.NET Core, A7 → A12 cho EF Core.
+
+---
+
+## Phần I — ASP.NET Core
+
+### A1. ASP.NET Core thực chất là gì
+
+Không phải một web server cắm sẵn như IIS hay Apache. Nó là một **thư viện** biến chương trình
+console C# bình thường thành ứng dụng web: bạn viết `Main`, gọi vài hàm dựng, và nó khởi động một
+web server tên **Kestrel** lắng nghe HTTP.
+
+Vì vậy `Program.cs` là file quan trọng nhất — nó là điểm bắt đầu thật sự của cả backend.
+
+#### Hai giai đoạn tách bạch, và đây là chỗ dễ nhầm nhất
+
+```csharp
+var builder = WebApplication.CreateBuilder(args);
+
+// ── GIAI ĐOẠN 1: ĐĂNG KÝ ──────────────────────────────
+// Khai báo "ứng dụng này cần những gì". Chưa chạy gì cả.
+builder.Services.AddApplication();
+builder.Services.AddInfrastructure(builder.Configuration);
+builder.Services.AddControllers();
+
+var app = builder.Build();      // ← ranh giới: chốt sổ, không đăng ký thêm được nữa
+
+// ── GIAI ĐOẠN 2: XỬ LÝ REQUEST ────────────────────────
+// Khai báo "mỗi request đi qua những bước nào".
+app.UseMiddleware<ExceptionHandlingMiddleware>();
+app.UseAuthentication();
+app.MapControllers();
+
+app.Run();                      // ← chặn tại đây, bắt đầu nghe HTTP
+```
+
+Mọi thứ **trước** `Build()` chạy đúng **một lần** lúc khởi động. Mọi thứ **sau** nó chạy **mỗi
+request**. Nhầm hai giai đoạn là nguồn gốc của rất nhiều lỗi khó hiểu ở người mới.
+
+Xem [Program.cs](backend/src/TripPlanner.WebApi/Program.cs) — có đánh số từng khối theo đúng thứ
+tự này.
+
+### A2. Dependency Injection — trái tim của ASP.NET Core
+
+**Vấn đề nó giải quyết.** Không có DI, `TripsController` muốn có `TripService` thì phải tự tạo:
+
+```csharp
+// KHÔNG làm thế này
+var service = new TripService(
+    new TripRepository(new ApplicationDbContext(...)),
+    new DestinationRepository(...), ...);
+```
+
+Controller khi đó phải biết cách dựng cả cây phụ thuộc bên dưới nó, và test thì không thay thế
+được thứ gì.
+
+**Cách DI làm.** Bạn chỉ **khai báo cái mình cần** ở constructor:
+
+```csharp
+public class TripsController : ControllerBase
+{
+    private readonly ITripService _tripService;
+
+    public TripsController(ITripService tripService)   // "tôi cần một ITripService"
+    {
+        _tripService = tripService;
+    }
+}
+```
+
+Rồi ở giai đoạn đăng ký, nói cho container biết ai hiện thực cái đó:
+
+```csharp
+services.AddScoped<ITripService, TripService>();
+```
+
+Lúc có request, container tự dựng toàn bộ cây: thấy controller cần `ITripService` → dựng
+`TripService` → thấy nó cần `ITripRepository` → dựng `TripRepository` → thấy nó cần
+`ApplicationDbContext` → dựng nốt. Bạn không viết một dòng `new` nào.
+
+**Vì sao dự án này phụ thuộc vào `interface` chứ không phải class:** vì đó là điều kiện để tầng
+Application không cần biết EF Core tồn tại (mục 2). Container mới là nơi duy nhất biết
+`ITripRepository` thật ra là EF Core.
+
+#### Ba vòng đời — và hệ quả thật trong dự án
+
+| Đăng ký | Nghĩa là | Dùng cho |
+|---|---|---|
+| `AddScoped` | **một instance cho mỗi HTTP request** | `DbContext`, repository, service |
+| `AddSingleton` | một instance cho cả vòng đời ứng dụng | cache, `TimeProvider`, config |
+| `AddTransient` | tạo mới mỗi lần được yêu cầu | object nhẹ, không giữ state |
+
+`Scoped` không phải chi tiết vụn vặt — nó giải thích một hành vi mà bạn sẽ gặp trong code này:
+
+> `ApplicationDbContext` là **Scoped**, nên trong **cùng một request**, `TripRepository` và
+> `DestinationRepository` dùng **chung một** `DbContext`. Đó chính là lý do
+> `TripRepository.UpdateAsync` flush luôn cả `Destination` mà repository kia vừa thêm — và là lý
+> do `TripService.AddDestinationAsync` phải có ghi chú ORDER MATTERS.
+
+Xem lại mục 2 để hiểu vì sao điều đó lại quan trọng.
+
+**Nơi đăng ký trong dự án này:** mỗi tầng một file `DependencyInjection.cs`, `Program.cs` chỉ gọi
+ba dòng `AddApplication()` / `AddInfrastructure()` / `AddWebApi()`.
+
+### A3. Middleware — request đi qua một dây chuyền
+
+Mỗi request không nhảy thẳng vào controller. Nó chui qua một **chuỗi** các lớp xử lý, mỗi lớp
+được quyền làm gì đó **trước** và **sau** phần còn lại của chuỗi:
+
+```
+Request  →  ExceptionHandling  →  CORS  →  Authentication  →  Authorization  →  Controller
+                    ↑                                                              │
+                    └──────────────── Response đi ngược trở ra ────────────────────┘
+```
+
+Một middleware nhìn như thế này — chú ý `await _next(context)` chính là "phần còn lại của dây
+chuyền":
+
+```csharp
+public async Task InvokeAsync(HttpContext context)
+{
+    try
+    {
+        await _next(context);        // gọi các lớp phía sau + controller
+    }
+    catch (Exception ex)             // bắt được mọi lỗi ném ra từ bên trong
+    {
+        await HandleAsync(context, ex);
+    }
+}
+```
+
+Vì nó bọc `_next` trong `try/catch`, `ExceptionHandlingMiddleware` phải nằm **ngoài cùng** thì mới
+bắt được lỗi của mọi thứ phía sau. Đó là lý do thứ tự khai báo trong `Program.cs` quan trọng — mục
+4 giải thích từng vị trí.
+
+**Hệ quả trong dự án:** không controller nào có `try/catch`. Service cứ ném exception mang ngữ
+nghĩa nghiệp vụ (`NotFoundException`, `ConflictException`), middleware dịch sang HTTP status.
+
+### A4. Controller, routing và model binding
+
+```csharp
+[ApiController]
+[Route("api/[controller]")]        // [controller] = "Trips" → /api/trips
+[Authorize]
+public class TripsController : ControllerBase
+{
+    [HttpPost("{tripId:guid}/destinations")]
+    public async Task<ActionResult<TripDestinationDto>> AddDestination(
+        Guid tripId,                          // ① lấy từ URL
+        AddDestinationRequest request,        // ② lấy từ body JSON
+        CancellationToken cancellationToken)  // ③ framework tự truyền
+        => Ok(await _tripService.AddDestinationAsync(tripId, request, cancellationToken));
+}
+```
+
+Ba tham số, ba nguồn khác nhau, và **bạn không viết code lấy chúng** — ASP.NET Core tự làm, gọi là
+**model binding**:
+
+1. `tripId` khớp với `{tripId:guid}` trong route. Phần `:guid` là **ràng buộc**: URL không phải
+   GUID sẽ 404 ngay, không vào tới method.
+2. `request` được deserialize từ JSON body thành C# record. Sai kiểu → 400 tự động.
+3. `CancellationToken` được framework cấp, và nó **huỷ khi client ngắt kết nối**. Đó là lý do gần
+   như mọi method trong dự án đều nhận và chuyền tiếp nó xuống tận EF Core — user đóng tab thì
+   query cũng dừng, không tốn tài nguyên vô ích.
+
+`ActionResult<T>` cho phép trả về **hoặc** dữ liệu **hoặc** một status code: `Ok(x)` → 200,
+`NoContent()` → 204, `CreatedAtAction(...)` → 201 kèm header `Location`.
+
+### A5. Authentication vs Authorization
+
+Hai từ hay bị lẫn, và ASP.NET Core tách chúng thành hai bước riêng:
+
+| | Câu hỏi | Middleware | Kết quả |
+|---|---|---|---|
+| **Authentication** | *Bạn là ai?* | `UseAuthentication()` | **dựng** `HttpContext.User` từ token |
+| **Authorization** | *Bạn có được phép không?* | `UseAuthorization()` | **đọc** `HttpContext.User`, so với `[Authorize]` |
+
+Phải theo đúng thứ tự đó: đảo lại thì bước kiểm quyền chạy khi chưa ai dựng danh tính, và **mọi**
+request đều bị coi là ẩn danh.
+
+#### JWT hoạt động ra sao
+
+JWT là một chuỗi gồm ba phần ngăn bởi dấu chấm: `header.payload.signature`.
+
+- **payload** chứa các **claim** — mẩu thông tin về người dùng, ở đây là user id và email.
+- **signature** được ký bằng `Jwt__Key` mà chỉ server biết.
+
+Điểm mấu chốt: payload **không mã hoá**, ai cũng đọc được (thử dán vào jwt.io). Cái token bảo vệ
+không phải là bí mật nội dung, mà là **tính toàn vẹn** — sửa một ký tự trong payload thì chữ ký
+không khớp nữa và server từ chối. Nên **không bao giờ để dữ liệu nhạy cảm vào JWT**.
+
+Hệ quả lớn: server **không cần lưu session**. Token tự mang đủ thông tin và tự chứng minh mình
+thật. Đây là lý do mục 13 nói "JWT là stateless nên auth scale sẵn".
+
+Trong dự án, code nghiệp vụ không tự đọc claim. Nó gọi `ICurrentUserService.GetRequiredUserId()`,
+và đó là ranh giới giữ cho tầng Application không dính tới `HttpContext`.
+
+### A6. Configuration và `IOptions`
+
+Cấu hình đến từ nhiều nguồn, chồng lên nhau theo thứ tự ưu tiên: biến môi trường (dự án này nạp
+từ `.env`), rồi tham số dòng lệnh, rồi giá trị mà test host tự cấp.
+
+Thay vì đọc chuỗi thô rải rác khắp nơi, ASP.NET Core cho **gom vào một class**:
+
+```csharp
+public class JwtSettings
+{
+    public string Key { get; set; } = "";
+    public string Issuer { get; set; } = "TripPlanner";   // có default
+    public int ExpiryMinutes { get; set; } = 60;
+}
+```
+
+rồi inject qua `IOptions<JwtSettings>`. Lợi ích: **có kiểu dữ liệu** (sai tên key là gãy lúc
+build, không phải lúc chạy), và **kiểm tra được lúc khởi động** — `Jwt__Key` để trống thì host
+**từ chối chạy** thay vì âm thầm ký token bằng chuỗi rỗng.
+
+Một chi tiết tinh tế đáng nhớ: dự án đọc `IOptions<JwtSettings>` **thay vì**
+`builder.Configuration["Jwt:Key"]`. Lý do là **thời điểm** — đọc trực tiếp sẽ lấy giá trị **ngay
+lúc dựng**, chạy trước khi test host kịp cấp giá trị riêng của nó. `IOptions` trì hoãn việc đó
+tới lúc thật sự cần. Có test pin lại điều này (mục 4).
+
+---
+
+## Phần II — EF Core
+
+### A7. ORM, `DbContext` và `DbSet`
+
+**EF Core là một ORM** — Object-Relational Mapper. Nó dịch qua lại giữa hai thế giới: class C# và
+bảng quan hệ.
+
+| C# | Database |
+|---|---|
+| class `Trip` | bảng `Trips` |
+| property `Name` | cột `Name` |
+| một object `Trip` | một dòng |
+| `trip.Days` (collection) | quan hệ khoá ngoại sang bảng `ItineraryDays` |
+
+`ApplicationDbContext` là **phiên làm việc với database**. Nó Scoped, tức mỗi HTTP request có một
+cái riêng, và nó chết khi request kết thúc.
+
+```csharp
+public class ApplicationDbContext : DbContext
+{
+    public DbSet<Trip> Trips => Set<Trip>();      // "bảng Trips, truy vấn được bằng LINQ"
+    public DbSet<User> Users => Set<User>();
+}
+```
+
+Việc bảng nào ánh xạ ra sao (khoá chính, index, độ dài cột, quan hệ) không nằm trong entity mà ở
+các file `*Configuration.cs` riêng — giữ cho `Trip` trong tầng Domain sạch, không dính chút EF Core
+nào. Đó là điều kiện để `TripPlanner.Domain.csproj` **không có một package reference nào** (mục 2).
+
+### A8. LINQ được dịch thành SQL — và cái bẫy `IQueryable`
+
+Bạn viết C#, EF sinh SQL:
+
+```csharp
+_context.Trips.Where(t => t.UserId == userId)
+// → SELECT * FROM "Trips" WHERE "UserId" = @userId
+```
+
+**Điểm quan trọng nhất: query chưa chạy ngay.** `Where` chỉ *dựng thêm* vào cây biểu thức. SQL chỉ
+được gửi đi khi bạn gọi một method **kết thúc**: `ToListAsync()`, `FirstOrDefaultAsync()`,
+`AnyAsync()`, `CountAsync()`.
+
+Đây là cái bẫy kinh điển của người mới:
+
+```csharp
+// ✅ ĐÚNG — lọc chạy trong SQL, chỉ trip của user này đi qua dây
+var mine = await _context.Trips.Where(t => t.UserId == userId).ToListAsync();
+
+// ❌ SAI — ToListAsync() kéo TOÀN BỘ bảng Trips về RAM, rồi mới lọc bằng C#
+var mine = (await _context.Trips.ToListAsync()).Where(t => t.UserId == userId);
+```
+
+Hai dòng cho ra **cùng kết quả**, nên test vẫn xanh, nhưng dòng dưới sẽ sập khi bảng lớn. Quy tắc:
+`IQueryable` = *chưa chạy, còn dịch sang SQL được*; `IEnumerable`/`List` = *đã chạy rồi, từ đây trở
+đi là C# trong RAM*.
+
+Dự án tận dụng điều này ở [TripMappings.cs](backend/src/TripPlanner.Application/Features/Trips/TripMappings.cs):
+mapping được khai báo dưới dạng `Expression`, nên `trip.Items.Count` được **dịch thành
+`COUNT(*)`** thay vì nạp mọi item về rồi mới đếm.
+
+### A9. Change tracker — vì sao không cần lệnh `UPDATE`
+
+Đây là cơ chế đặc trưng nhất của EF Core, và cũng là thứ gây bất ngờ nhất.
+
+Khi bạn query mà **không** có `AsNoTracking()`, `DbContext` **ghi nhớ** object trả về, kèm một
+**bản chụp giá trị gốc**:
+
+```csharp
+var trip = await _context.Trips.FirstOrDefaultAsync(...);   // context nhớ trip này
+trip.Name = "Tên mới";                                       // chỉ sửa object C#, chưa chạm DB
+await _context.SaveChangesAsync();                           // ← so sánh với bản chụp, sinh UPDATE
+```
+
+`SaveChangesAsync` duyệt mọi entity đang được theo dõi, so hiện tại với bản chụp, rồi tự sinh
+`INSERT`/`UPDATE`/`DELETE` cho đúng những gì đã đổi — và gửi **tất cả trong một transaction**.
+
+Ba điều rút ra:
+
+1. **Không có method `Update`** trong EF theo nghĩa thông thường. Bạn sửa object rồi lưu, thế thôi.
+2. **`DbContext` bản thân nó chính là một Unit of Work** — nó gom thay đổi rồi commit một lượt. Đây
+   là lý do dự án không thêm `IUnitOfWork` (mục 13).
+3. **`AsNoTracking()` tắt cơ chế này.** Query nhanh hơn và tốn ít RAM hơn vì không phải giữ bản
+   chụp — nhưng object trả về **không lưu được**.
+
+Điểm 3 chính là cái bẫy đã được ghi hẳn vào doc comment của `ITripRepository`:
+
+```csharp
+var trip = await _trips.GetDetailsAsync(...);   // AsNoTracking!
+trip.Name = "Tên mới";
+await _trips.UpdateAsync(trip);                 // không lưu gì cả — và KHÔNG báo lỗi
+```
+
+Biên dịch sạch, chạy không exception, và không có câu `UPDATE` nào được gửi đi. Đường ghi phải
+dùng `GetForUpdateAsync` (có tracking).
+
+### A10. Navigation property và `Include`
+
+`Trip.Days` và `Trip.Items` là **navigation property** — chúng biểu diễn quan hệ khoá ngoại dưới
+dạng object C#.
+
+Dự án **không bật lazy loading**, nên mặc định các collection này **rỗng** sau khi query. Muốn có
+dữ liệu phải nói rõ — gọi là **eager loading**:
+
+```csharp
+await _context.Trips
+    .Include(t => t.Days)                    // nạp kèm các ngày
+        .ThenInclude(d => d.Items)           // và item của từng ngày
+    .FirstOrDefaultAsync(...);
+```
+
+Tại sao không bật lazy loading cho tiện? Vì nó gây **N+1 query**: vòng lặp qua 30 item, mỗi lần
+chạm `item.Destination` lại lặng lẽ bắn thêm một query — 31 lần đi database mà nhìn code không hề
+thấy. `Include` bắt bạn nói trước mình cần gì, nên chi phí luôn nhìn thấy được.
+
+Nhưng `Include` cũng có cái giá của nó, và đó là **cartesian explosion** — mục 9 mổ xẻ chi tiết
+với số đo thật. Đọc phần đó sau khi nắm A10.
+
+### A11. Migration — quản lý phiên bản của schema
+
+Sửa entity C# thì database phải đổi theo. EF Core làm việc đó bằng **migration**: so model hiện
+tại với snapshot của lần trước, sinh ra file mô tả phần chênh lệch.
+
+```bash
+dotnet ef migrations add ThemCotMoi \
+  --project src/TripPlanner.Infrastructure \
+  --startup-project src/TripPlanner.WebApi
+```
+
+Mỗi migration có `Up()` (áp dụng) và `Down()` (quay lui), commit vào git như code thường. Dự án
+này tự chạy migration lúc khởi động (`ApplyMigrationsAsync` trong `Program.cs`) — tiện cho môi
+trường học tập, nhưng mục 14 có ghi vì sao production nên tách ra.
+
+Một chi tiết dễ hiểu nhầm: migration `SetIdValueGeneratedNever` **rỗng**, không có lệnh SQL nào.
+Nó vẫn phải giữ, vì nó mang thay đổi **metadata** vào file snapshot mà các migration sau sẽ diff
+với. Xoá đi là migration tiếp theo tính chênh lệch sai.
+
+### A12. Những cái bẫy EF Core đã gặp trong chính dự án này
+
+Tất cả đều là chuyện thật, đều đã được ghi lại ở đâu đó trong report — bảng này gom lại để dễ tra:
+
+| Bẫy | Biểu hiện | Vì sao | Mục |
+|---|---|---|---|
+| `AsNoTracking` + lưu | Không có `UPDATE`, **không báo lỗi** | Change tracker không biết object đó | A9, mục 2 |
+| Thiếu `ValueGeneratedNever` | `DbUpdateConcurrencyException` khi thêm mới | EF tưởng Guid do DB sinh → coi row mới là row cũ → phát `UPDATE` | mục 9 |
+| Hai `Include` collection cùng cấp | Query chậm dần theo bình phương | Cartesian explosion | mục 9 |
+| `AsNoTracking` ở đường ghi | Sửa `trip.Items` mà `day.Items` không thấy | Không có identity resolution | mục 9 |
+| EF InMemory trong test | Test xanh nhưng production lỗi | InMemory **không** phải relational: bỏ qua unique index, `HasMaxLength`, `AsSplitQuery` | mục 11, 14 |
+
+Cái cuối đáng nhấn: EF InMemory tiện cho test nhưng **không phải database**. Nó không enforce
+constraint, nên có những mảng code chỉ kiểm chứng được bằng suy luận trực tiếp trên Postgres —
+hoặc bằng `TripPlanner.QueryBenchmarks`.
 
