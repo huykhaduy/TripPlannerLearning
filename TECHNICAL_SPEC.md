@@ -86,9 +86,7 @@ index and by an app-level check before insert.
   plus a separate purpose-scoped email-verification token — see §9's Authentication
   details), no roles/permissions, no logging beyond default ASP.NET Core logging plus
   one `ILogger.LogError` call for unhandled (500) exceptions, no CI configuration (no
-  `.github/workflows` or other CI config in the repo), no integration tests (a
-  `public partial class Program` hook exists for `WebApplicationFactory`, but no
-  integration test project uses it).
+  `.github/workflows` or other CI config in the repo).
 - **[Observed]** No longer true: the frontend now has full API wrappers
   (`api/destinations.ts`, `api/trips.ts` alongside `api/auth.ts`) and TypeScript types
   for every DTO in [types.ts](frontend/src/types.ts); `DestinationService` now has an
@@ -111,7 +109,8 @@ backend/
     TripPlanner.Infrastructure/    # EF Core, JWT, BCrypt, Geoapify client, migrations
     TripPlanner.WebApi/            # controllers, middleware, Program.cs (no appsettings.json — see §10 Configuration summary)
   tests/
-    TripPlanner.UnitTests/ # Auth/, Trips/, Destinations/, Repositories/, Identity/ — 5 classes, 77 tests
+    TripPlanner.UnitTests/    # Domain + Application + Infrastructure — 21 classes, 279 tests
+    TripPlanner.WebApi.Tests/ # WebApplicationFactory integration — 7 classes, 69 tests
 frontend/
   src/
     api/          # client.ts (axios + JWT interceptor + 401 logout interceptor),
@@ -1008,26 +1007,75 @@ rather than being mapped to 409.
 
 ### Testing [Observed]
 
-Five test classes under `backend/tests/TripPlanner.UnitTests/`, **78 tests
-total, all passing** (`dotnet test`):
+**28 test classes across two projects, 348 tests, all passing** (`dotnet test`).
+Counts below are executed test cases (theory rows counted individually), taken from a
+TRX run, so they are higher than the method count in each file.
+
+The split is by **what a test needs to run**, not by which layer it covers:
+
+| Project | Tests | Needs |
+|---|---|---|
+| `backend/tests/TripPlanner.UnitTests` | 279 | Nothing but the process — covers Domain, Application **and** Infrastructure |
+| `backend/tests/TripPlanner.WebApi.Tests` | 69 | A `WebApplicationFactory` host — real routing, auth, middleware |
+
+#### `TripPlanner.UnitTests` (279)
 
 | Class | Tests | Covers |
 |---|---|---|
-| [AuthServiceTests](backend/tests/TripPlanner.UnitTests/Auth/AuthServiceTests.cs) | 13 | Register (success/duplicate email/short password, no session issued), login (success when verified/wrong password even when unverified/**blocked with 403 when unverified**), email verification (send-on-register, send failure doesn't block registration, verify with valid/invalid token, resend for unknown/already-verified/unverified emails) |
-| [TripServiceTests](backend/tests/TripPlanner.UnitTests/Trips/TripServiceTests.cs) | 27 | Create/list (including NFR 6 ownership filtering and newest-first ordering), full add/move/reorder/schedule coverage, day regeneration on date changes, duplicate-in-bucket conflicts |
-| [DestinationServiceTests](backend/tests/TripPlanner.UnitTests/Destinations/DestinationServiceTests.cs) | 29 | Search/attractions/details (F1 US1-3, F2 US1), validation errors, cache hit/miss/expiry (via a fake `TimeProvider`), stale-on-provider-outage fallback, image enrichment |
-| [RepositoryTests](backend/tests/TripPlanner.UnitTests/Repositories/RepositoryTests.cs) | 5 | Generic `Repository<T>` + `UnitOfWork` only (add/get/get-all), using `Destination` as a stand-in entity — no dedicated `TripRepository`/`UserRepository` named-query tests exist; those queries are exercised indirectly through `TripServiceTests`/`AuthServiceTests` |
-| [JwtTokenGeneratorTests](backend/tests/TripPlanner.UnitTests/Identity/JwtTokenGeneratorTests.cs) | 4 | The **real** `JwtTokenGenerator` (the other classes mock `IJwtTokenGenerator`) — email-verification token round-trip, garbage-token rejection, and rejecting a normal access token replayed as a verification token |
+| [DestinationServiceTests](backend/tests/TripPlanner.UnitTests/Destinations/DestinationServiceTests.cs) | 31 | F1/US1-3 + F2/US1. Provider and image search mocked, validators real, EF InMemory for the details DB fallback; cache hit/miss/expiry via a fake `TimeProvider`, stale-on-outage fallback, image enrichment |
+| [TripServiceTests](backend/tests/TripPlanner.UnitTests/Trips/TripServiceTests.cs) | 27 | Create/list (NFR 6 ownership, newest-first), add/schedule/move/reorder with clamped positions and source resequencing, day regeneration on date change (including shrinking a range returning orphans to Saved Places), duplicate-in-bucket conflicts, destination cache upsert on first add |
+| [GeoapifyClientTests](backend/tests/TripPlanner.UnitTests/Infrastructure/GeoapifyClientTests.cs) | 25 | URL construction (lon-before-lat, radius in metres), GeoJSON→DTO mapping, lenient parsing of numeric names, and failure classification — including that a cancelled request is not reported as an outage |
+| [DestinationValidatorTests](backend/tests/TripPlanner.UnitTests/Destinations/DestinationValidatorTests.cs) | 23 | Boundaries either side of every coordinate/radius limit — numbers an off-by-one would silently move |
+| [TripValidatorTests](backend/tests/TripPlanner.UnitTests/Trips/TripValidatorTests.cs) | 21 | Trip rules, notably the trip-length rule: a strict `<` against a *difference* of day numbers, so its real boundary sits one day from where the message reads |
+| [AuthValidatorTests](backend/tests/TripPlanner.UnitTests/Auth/AuthValidatorTests.cs) | 19 | Which **property** carries each error and the exact **message** (several deliberately identical so they can't probe whether an account exists) |
+| [AuthServiceTests](backend/tests/TripPlanner.UnitTests/Auth/AuthServiceTests.cs) | 19 | Register (duplicate email, no session issued), login (403 when unverified, generic 401 otherwise), verification send/verify/resend, registration surviving a mail outage, and the registration race handled via a simulated `ConcurrencyException` |
+| [TripRepositoryTests](backend/tests/TripPlanner.UnitTests/Persistence/TripRepositoryTests.cs) | 17 | The ownership filter: every read ANDs `userId` into the predicate, so another user's trip returns null → 404 rather than 403, and ids can't be probed |
+| [ResilientDistributedCacheTests](backend/tests/TripPlanner.UnitTests/Infrastructure/ResilientDistributedCacheTests.cs) | 16 | Which failures the decorator swallows (Redis unreachable → miss/no-op) versus lets through |
+| [SerperImageClientTests](backend/tests/TripPlanner.UnitTests/Infrastructure/SerperImageClientTests.cs) | 13 | Not spending credits: no request without a key, hard cap on results, failure translation |
+| [TripTests](backend/tests/TripPlanner.UnitTests/DomainRules/TripTests.cs) | 9 | `Trip.SetDates` — the only business rule living in Domain rather than a validator |
+| [UserRepositoryTests](backend/tests/TripPlanner.UnitTests/Persistence/UserRepositoryTests.cs) | 8 | Exact-match email lookup, existence checks, and that a fetched user stays tracked so a follow-up `UpdateAsync` saves |
+| [DestinationRepositoryTests](backend/tests/TripPlanner.UnitTests/Persistence/DestinationRepositoryTests.cs) | 8 | Tracked vs. read-only fetches, detaching the losing copy on a concurrent insert while still rethrowing, and the long `place_id`s Geoapify really returns |
+| [SmtpEmailSenderTests](backend/tests/TripPlanner.UnitTests/Infrastructure/SmtpEmailSenderTests.cs) | 8 | The branch taken before any server is contacted: unconfigured returns quietly (the state of every fresh clone), configured actually tries |
+| [BCryptPasswordHasherTests](backend/tests/TripPlanner.UnitTests/Infrastructure/BCryptPasswordHasherTests.cs) | 8 | Salted, non-reversible, verifiable — stated explicitly rather than trusted to the library name |
+| [BaseEntityTests](backend/tests/TripPlanner.UnitTests/DomainRules/BaseEntityTests.cs) | 7 | Entities supply their own keys — the reason every configuration declares `ValueGeneratedNever()` |
+| [ValidationExtensionsTests](backend/tests/TripPlanner.UnitTests/Common/ValidationExtensionsTests.cs) | 7 | The bridge every feature method's first line goes through; if FluentValidation's own `ValidationException` escaped, every 400 would become a 500 with no field errors |
+| [AppUrlProviderTests](backend/tests/TripPlanner.UnitTests/Infrastructure/AppUrlProviderTests.cs) | 6 | Trailing-slash and missing-fallback handling for the string every verification link is built from |
+| [JwtTokenGeneratorTests](backend/tests/TripPlanner.UnitTests/Identity/JwtTokenGeneratorTests.cs) | 4 | The **real** generator (other classes mock the interface) — verification-token round-trip, garbage rejection, and refusing an access token replayed as a verification token |
+| [ApplicationDbContextTests](backend/tests/TripPlanner.UnitTests/Persistence/ApplicationDbContextTests.cs) | 2 | The `SaveChangesAsync` override's audit stamping, and that an ordinary save is left alone |
+| [DestinationConfigurationTests](backend/tests/TripPlanner.UnitTests/Persistence/DestinationConfigurationTests.cs) | 1 | Pins a deliberate absence — `ProviderId` carries no max length — by asserting model metadata, since InMemory ignores `HasMaxLength` entirely |
 
-Pattern (all classes): fresh EF InMemory database per test (`Guid.NewGuid()` database
-name), real validators/hashers where cheap, `Mock<T>` (Moq) for external providers and
-`IJwtTokenGenerator`/`ICurrentUserService` where a fake is cheaper than the real thing.
-Note the InMemory provider does **not** enforce the unique indexes or FK behaviors
-described in §8 (and throws a different exception shape on a PK collision than the
-real SQL providers do — see §8.1), so the concurrency catch/retry paths in
-`AuthService`/`TripService`/`UnitOfWork` are **not exercised by `dotnet test`** and
-must be reasoned about directly against the real Postgres provider. No integration
-tests exist despite the `public partial class Program` hook.
+#### `TripPlanner.WebApi.Tests` (69)
+
+`WebApplicationFactory<Program>` against the real `Program`, with `ApplicationDbContext`
+swapped to EF InMemory and external providers replaced by fakes — so no Docker, Postgres,
+or network is needed.
+
+| Class | Tests | Covers |
+|---|---|---|
+| [ExceptionHandlingMiddlewareTests](backend/tests/TripPlanner.WebApi.Tests/ExceptionHandlingMiddlewareTests.cs) | 19 | The two security decisions inside the middleware: hiding an unmapped exception's message outside Development (it may carry SQL or a connection string), and logging at Error only for the 500 branch |
+| [DestinationsEndpointsTests](backend/tests/TripPlanner.WebApi.Tests/DestinationsEndpointsTests.cs) | 17 | That these endpoints stay **public** (F3/US8 — a stray `[Authorize]` would break anonymous browsing and nothing else would notice), plus query-string binding |
+| [TripsEndpointsTests](backend/tests/TripPlanner.WebApi.Tests/TripsEndpointsTests.cs) | 14 | The `[Authorize]` gate and per-user ownership (NFR 6) over real HTTP — `TripServiceTests` can't reach either, since it injects a hand-picked `ICurrentUserService` |
+| [CurrentUserServiceTests](backend/tests/TripPlanner.WebApi.Tests/CurrentUserServiceTests.cs) | 10 | Edges a real request can't easily produce: no `HttpContext`, an unparseable subject claim, a token carrying raw `sub` |
+| [AuthEndpointsTests](backend/tests/TripPlanner.WebApi.Tests/AuthEndpointsTests.cs) | 7 | Routing, model binding, and app-exception→`ProblemDetails` shape for the reference slice |
+| [HealthEndpointTests](backend/tests/TripPlanner.WebApi.Tests/HealthEndpointTests.cs) | 1 | The exact `/health` path and its anonymous access, both depended on by `docker-compose.deploy.yml`'s healthcheck |
+| [TestHostConfigurationTests](backend/tests/TripPlanner.WebApi.Tests/TestHostConfigurationTests.cs) | 1 | That the factory's `Jwt:Key` wins over a developer's real `.env`, so the suite can never sign tokens with a live key |
+
+#### Pattern and known gaps
+
+Fresh EF InMemory database per test (`Guid.NewGuid()` name), real implementations where
+cheap (validators, `BCryptPasswordHasher`), `Mock<T>` (Moq) for ports. Services take no
+validator arguments — they hold their own static instances — and anything needing an
+`ILogger` gets `NullLogger<T>.Instance` or the `RecordingLogger` test double.
+`StubHttpMessageHandler` drives the HTTP adapters without a network.
+
+The InMemory provider does **not** enforce the unique indexes or FK behaviours in §8, so
+`ApplicationDbContext`'s unique-violation → `ConcurrencyException` translation is **not
+exercised by `dotnet test`** and must be reasoned about against Postgres directly. The
+*callers* are covered: `AuthServiceTests` simulates a `ConcurrencyException` at the
+repository boundary with a mock, and `DestinationRepositoryTests` pins the detach-then-
+rethrow behaviour. `TripService`'s two handlers
+(`GetOrCreateDestinationAsync`, `SaveWithDuplicateGuardAsync`) are the remaining gap.
+
 
 ---
 
