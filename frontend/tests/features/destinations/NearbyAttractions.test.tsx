@@ -77,14 +77,38 @@ describe('NearbyAttractions', () => {
     expect(screen.queryByText('Golden Bridge')).not.toBeInTheDocument();
   });
 
+  it('shows a skeleton grid while the lookup is in flight', () => {
+    // Never resolves, so the section stays in its pending branch.
+    vi.mocked(destinationsApi.getAttractions).mockReturnValue(new Promise(() => {}));
+
+    renderNearby();
+
+    expect(screen.getByRole('region', { name: 'Loading nearby experiences' })).toHaveAttribute('aria-busy', 'true');
+    // The heading is real from the start — only the cards are placeholders.
+    expect(screen.getByRole('heading', { name: 'Nearby experiences' })).toBeInTheDocument();
+  });
+
+  it('drops the skeleton once the real cards arrive', async () => {
+    vi.mocked(destinationsApi.getAttractions).mockResolvedValue([attraction('geo-1', 'Marble Mountains')]);
+
+    renderNearby();
+    await screen.findByText('Marble Mountains');
+
+    expect(screen.queryByRole('region', { name: 'Loading nearby experiences' })).not.toBeInTheDocument();
+  });
+
   it('renders nothing at all when only the current destination comes back', async () => {
     vi.mocked(destinationsApi.getAttractions).mockResolvedValue([attraction('geo-self', 'Golden Bridge')]);
 
     renderNearby('geo-self');
 
-    // An empty "Nearby experiences" heading would be worse than no section.
-    await waitFor(() => expect(destinationsApi.getAttractions).toHaveBeenCalled());
-    expect(screen.queryByRole('heading', { name: 'Nearby experiences' })).not.toBeInTheDocument();
+    // The skeleton shows first — "nothing nearby" isn't knowable until the
+    // lookup lands — but an empty "Nearby experiences" heading would be worse
+    // than no section, so the whole thing unmounts.
+    expect(screen.getByRole('heading', { name: 'Nearby experiences' })).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.queryByRole('heading', { name: 'Nearby experiences' })).not.toBeInTheDocument(),
+    );
   });
 
   it('stays hidden when the lookup fails', async () => {
@@ -94,8 +118,10 @@ describe('NearbyAttractions', () => {
 
     // This is a secondary section on someone else's page — a failure here must not
     // put an error in front of the destination they actually asked for.
-    await waitFor(() => expect(destinationsApi.getAttractions).toHaveBeenCalled());
-    expect(screen.queryByRole('heading', { name: 'Nearby experiences' })).not.toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Loading nearby experiences' })).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.queryByRole('heading', { name: 'Nearby experiences' })).not.toBeInTheDocument(),
+    );
   });
 
   it('caps the grid at six cards', async () => {

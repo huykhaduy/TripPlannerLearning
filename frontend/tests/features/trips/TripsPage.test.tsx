@@ -78,7 +78,26 @@ describe('TripsPage', () => {
     expect(
       await screen.findByText('Could not load your trips. Please try again.'),
     ).toBeInTheDocument();
-    expect(screen.queryByText('Loading your trips…')).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Loading your trips' })).not.toBeInTheDocument();
+  });
+
+  it('shows a skeleton grid until the trips arrive', async () => {
+    // Never resolves, so the page stays in its pending branch.
+    vi.mocked(tripsApi.getMyTrips).mockReturnValue(new Promise(() => {}));
+    renderTripsPage();
+
+    expect(screen.getByRole('region', { name: 'Loading your trips' })).toHaveAttribute('aria-busy', 'true');
+    // The create button is outside the loading branch on purpose — a user can
+    // start a new trip without waiting for the list.
+    expect(screen.getByRole('button', { name: '+ Plan new trip' })).toBeEnabled();
+  });
+
+  it('replaces the skeleton with the loaded trips', async () => {
+    vi.mocked(tripsApi.getMyTrips).mockResolvedValue([trip({ id: 'trip-1', name: 'Japan 2026' })]);
+    renderTripsPage();
+    await screen.findByText('Japan 2026');
+
+    expect(screen.queryByRole('region', { name: 'Loading your trips' })).not.toBeInTheDocument();
   });
 
   describe('creating a trip', () => {
