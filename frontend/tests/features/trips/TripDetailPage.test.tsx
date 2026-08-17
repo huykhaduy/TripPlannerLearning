@@ -72,12 +72,31 @@ describe('TripDetailPage', () => {
   // Load states
   // -------------------------------------------------------------------
 
-  it('shows a loading state until the trip arrives', () => {
+  it('shows a skeleton until the trip arrives', () => {
     vi.mocked(tripsApi.getTrip).mockReturnValue(new Promise(() => {}));
 
     renderTrip();
 
-    expect(screen.getByText('Loading trip…')).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Loading trip' })).toHaveAttribute('aria-busy', 'true');
+  });
+
+  it('leaves the way out reachable while the trip loads', async () => {
+    // A slow or wedged request must not trap the user on a page of placeholders.
+    vi.mocked(tripsApi.getTrip).mockReturnValue(new Promise(() => {}));
+
+    renderTrip();
+    await userEvent.click(screen.getByRole('link', { name: '← Back to my trips' }));
+
+    expect(await screen.findByRole('heading', { name: 'My trips' })).toBeInTheDocument();
+  });
+
+  it('replaces the skeleton with the loaded trip', async () => {
+    vi.mocked(tripsApi.getTrip).mockResolvedValue(trip({ name: 'Japan 2026' }));
+
+    renderTrip();
+    await screen.findByRole('heading', { name: 'Japan 2026' });
+
+    expect(screen.queryByRole('region', { name: 'Loading trip' })).not.toBeInTheDocument();
   });
 
   it('distinguishes a missing trip from a failed request', async () => {

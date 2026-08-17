@@ -36,6 +36,34 @@ function TripCardHeader({ id, coverImageUrl, status }: { id: string; coverImageU
   );
 }
 
+/**
+ * Placeholder grid shown while the trip list loads. Three cards — enough to
+ * fill the widest row (xl:grid-cols-3) without pretending to know the count.
+ * Shapes match TripCardHeader and the card body below it, so the real cards
+ * land in place rather than pushing the page around.
+ */
+function TripsSkeleton() {
+  return (
+    <section className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3" aria-busy="true" aria-label="Loading your trips">
+      {[0, 1, 2].map((i) => (
+        <Card key={i} padding="tight" className="flex h-full flex-col gap-0 overflow-hidden p-0">
+          <div className="h-24 w-full animate-pulse bg-slate-200" />
+          {/* gap-1/p-4 and the h-6/h-5/h-5 bar heights are the line boxes of the
+              real name, dates and count below — the three are always one line
+              each, so this body is exactly as tall as the loaded one. */}
+          <div className="flex flex-1 flex-col gap-1 p-4">
+            <div className="h-6 w-2/3 animate-pulse rounded bg-slate-200" />
+            <div className="h-5 w-1/2 animate-pulse rounded bg-slate-100" />
+            <div className="mt-auto pt-3">
+              <div className="h-5 w-28 animate-pulse rounded bg-slate-100" />
+            </div>
+          </div>
+        </Card>
+      ))}
+    </section>
+  );
+}
+
 /** F3/US1 & US10 — the current user's trip list plus a create-trip form. */
 export function TripsPage() {
   const [trips, setTrips] = useState<TripSummary[] | null>(null);
@@ -114,7 +142,7 @@ export function TripsPage() {
       {loadError ? (
         <p className="text-sm text-red-600">{loadError}</p>
       ) : trips === null ? (
-        <p className="text-sm text-slate-500">Loading your trips…</p>
+        <TripsSkeleton />
       ) : trips.length === 0 ? (
         <EmptyState icon="🗺️" message="No trips yet — create your first one above." />
       ) : (

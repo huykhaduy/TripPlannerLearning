@@ -91,6 +91,44 @@ function PhotoCarousel({ images, name }: { images: string[]; name: string }) {
 }
 
 /**
+ * Mirrors the loaded layout below — hero, description, Practical info — so the
+ * page doesn't jump when the details arrive. The map block is always drawn,
+ * because whether this destination has coordinates isn't knowable until then.
+ */
+function DetailsSkeleton() {
+  return (
+    <section className="mx-auto max-w-5xl" aria-busy="true" aria-label="Loading destination">
+      <div className="h-5 w-32 animate-pulse rounded bg-slate-200" />
+
+      <div className="mt-3 h-80 w-full animate-pulse rounded-2xl bg-slate-200 sm:h-96" />
+
+      <div className="mt-6 flex flex-col gap-2">
+        <div className="h-4 w-full animate-pulse rounded bg-slate-200" />
+        <div className="h-4 w-2/3 animate-pulse rounded bg-slate-200" />
+      </div>
+
+      <Card padding="tight" className="mt-6">
+        <h2 className="font-headline text-base font-semibold text-brand-600">Practical info</h2>
+        <div className="mt-3 grid grid-cols-1 gap-6 lg:grid-cols-2">
+          <div className="flex flex-col gap-3">
+            {[0, 1, 2].map((i) => (
+              <div key={i}>
+                <div className="h-4 w-24 animate-pulse rounded bg-slate-100" />
+                <div className="mt-1.5 h-4 w-3/4 animate-pulse rounded bg-slate-200" />
+              </div>
+            ))}
+          </div>
+          <div>
+            <div className="h-48 w-full animate-pulse rounded-lg bg-slate-200" />
+            <div className="mt-1.5 h-3 w-28 animate-pulse rounded bg-slate-100" />
+          </div>
+        </div>
+      </Card>
+    </section>
+  );
+}
+
+/**
  * F2/US1, US2 & US4 — full destination details, opened from a card in the
  * search results. The view must still render with any optional field absent
  * (photo, address, website, opening hours) — see spec §11.3.
@@ -147,11 +185,7 @@ export function DestinationDetailsPage() {
   }
 
   if (!details) {
-    return (
-      <Card className="mx-auto max-w-2xl">
-        <p className="text-sm text-slate-500">Loading destination…</p>
-      </Card>
-    );
+    return <DetailsSkeleton />;
   }
 
   // The backend always keeps imageUrl in sync as imageUrls[0] (or both empty),

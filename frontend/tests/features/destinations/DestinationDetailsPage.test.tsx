@@ -127,7 +127,7 @@ describe('DestinationDetailsPage', () => {
     expect(screen.getByRole('button', { name: '← Back to search' })).toBeInTheDocument();
   });
 
-  it('shows a loading state before the request settles', () => {
+  it('shows a skeleton before the request settles', () => {
     // Never resolves, so the page stays in its pending branch.
     vi.mocked(destinationsApi.getDestinationDetails).mockReturnValue(new Promise(() => {}));
 
@@ -135,7 +135,16 @@ describe('DestinationDetailsPage', () => {
 
     // Asserted positively: absence checks alone would also pass if the page
     // crashed or rendered nothing at all.
-    expect(screen.getByText('Loading destination…')).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Loading destination' })).toHaveAttribute('aria-busy', 'true');
     expect(screen.queryByText('Destination not found.')).not.toBeInTheDocument();
+  });
+
+  it('drops the skeleton once the destination arrives', async () => {
+    vi.mocked(destinationsApi.getDestinationDetails).mockResolvedValue(details);
+
+    renderDetails();
+    await screen.findByText('Golden Bridge');
+
+    expect(screen.queryByRole('region', { name: 'Loading destination' })).not.toBeInTheDocument();
   });
 });

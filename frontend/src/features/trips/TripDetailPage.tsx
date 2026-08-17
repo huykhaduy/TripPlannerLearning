@@ -7,6 +7,7 @@ import { Field, fieldControlClass } from '../../components/Field';
 import { Button } from '../../components/Button';
 import { Modal } from '../../components/Modal';
 import type { TripDestination, TripDetail } from '../../types';
+import { TripDetailSkeleton } from './TripDetailSkeleton';
 import { formatDates } from './TripThumbnail';
 
 /** Small thumbnail with the same missing/broken-image fallback as the attraction cards. */
@@ -302,11 +303,7 @@ export function TripDetailPage() {
   }
 
   if (!trip) {
-    return (
-      <Card className="mx-auto max-w-2xl">
-        <p className="text-sm text-slate-500">Loading trip…</p>
-      </Card>
-    );
+    return <TripDetailSkeleton />;
   }
 
   const hasDays = trip.days.length > 0;
